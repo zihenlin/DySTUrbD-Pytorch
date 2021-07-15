@@ -18,7 +18,7 @@ The class attributes are listed for debugging convenience.
         2. anchor
         3. trivial
 
-    employment          : Employment related information.
+    job         : Employment related information.
         1. status (Binary)
         2. local (Binary)
         3. job
@@ -57,19 +57,19 @@ The class attributes are listed for debugging convenience.
         2. area
         3. X
         4. Y
-        
+
     land            : land use
         1. Initial
         2. Current
-        
+
     floor           : floor properties
         1. number
         2. volume
-    
+
     usg             : USG codes
         1. Broad
         2. Specific
-        
+
     status          : open or close
         0. open
         1. close

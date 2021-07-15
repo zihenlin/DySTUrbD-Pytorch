@@ -136,7 +136,7 @@ class Agents(object):
         """
         res = dict()
 
-        res["house"] = util.load_csv(path, cols=[1])
+        res["house"] = util.load_csv(path, cols=[1]).view(-1)
 
         return res
 
