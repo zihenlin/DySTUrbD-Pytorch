@@ -1,3 +1,6 @@
+This is the Pytorch implementation of [DySTUrbB](https://github.com/amirca91/DySTUrbD/tree/COVID_ABM).
+The class attributes are listed for debugging convenience.
+
 ### Class Agents
 
     Attributes
