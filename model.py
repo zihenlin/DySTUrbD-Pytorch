@@ -85,6 +85,9 @@ class DySTUrbD_Epi(object):
         res[res < threshold] = 0
         res = -torch.log(res)
 
+        print("BB done!")
+
+        del coor, distance, scores
         return res
 
     def __agent_agent(self):
@@ -109,12 +112,13 @@ class DySTUrbD_Epi(object):
         age = self.__age_sim()
         dist = self.__house_dist()
         w = {"income": 1, "age": 1, "dist": 1}
-        res = w["income"] * income * w["age"] * age * w["dist"] * dist
+        res = income.mul(w["income"]).mul(age.mul(w["age"])).mul(dist.mul(w["dist"]))
 
         h = self.agents.identity["house"]
         res[h == h.view(-1, 1)] = 1  # same house gets max probability
         res[res < threshold] = 0
         res = -torch.log(res)
+        print("AA done!")
 
         return res
 
@@ -138,8 +142,9 @@ class DySTUrbD_Epi(object):
 
         h_income = h_income[agent_hh]
         res = h_income.sub(h_income.view(-1, 1)).abs()
-        res = 1 - (res.div(res.max(dim=1)[0]))
+        res = 1 - torch.nn.functional.normalize(res)
 
+        del h_unique, agent_hh, h_income, mask
         return res
 
     def __age_sim(self):
@@ -151,8 +156,8 @@ class DySTUrbD_Epi(object):
         res : torch.Tensor
         """
         age = self.agents.identity["age"]
-        res = age.sub(age.view(-1, 1)).abs()
-        res = 1 - (res.div(res.max(dim=1)[0]))
+        res = age.sub(age.view(-1, 1)).abs().float()
+        res = 1 - torch.nn.functional.normalize(res)
 
         return res
 
@@ -166,7 +171,7 @@ class DySTUrbD_Epi(object):
         """
         agent_homes = self.agents.building["house"]
         buildings = self.buildings.identity["id"]
-        h_idx = (buildings[:, None] == agent_homes).long().argmax(dim=0)
+        h_idx = (buildings[:, None] == agent_homes).int().argmax(dim=0)
         coor = torch.cat(
             (
                 self.buildings.identity["X"][h_idx].view(-1, 1),
@@ -175,8 +180,9 @@ class DySTUrbD_Epi(object):
             1,
         )
         res = torch.cdist(coor, coor)
-        res = 1 - (res.div(res.max(dim=1)[0]))
+        res = 1 - torch.nn.functional.normalize(res)
 
+        del h_idx, coor
         return res
 
     def __agent_anchor(self):
@@ -201,12 +207,14 @@ class DySTUrbD_Epi(object):
         """
         agents = self.agents.building["anchor"]
         anchors = torch.unique(agents)
-        res = torch.zeros((agents.shape[0], anchors.shape[0]))
+        res = torch.zeros((agents.shape[0], anchors.shape[0])).bool()
 
-        for idx in anchors.shape[0]:
+        for idx in range(anchors.shape[0]):
             mask = agents == anchors[idx]
             res[mask, idx] = 1
 
+        print("Aa done!")
+        del anchors, mask
         return res
 
     def __agent_house(self):
@@ -231,10 +239,12 @@ class DySTUrbD_Epi(object):
         """
         agents = self.agents.building["house"]
         houses = torch.unique(agents)
-        res = torch.zeros((agents.shape[0], houses.shape[0]))
+        res = torch.zeros((agents.shape[0], houses.shape[0])).bool()
 
-        for idx in houses.shape[0]:
+        for idx in range(houses.shape[0]):
             mask = agents == houses[idx]
             res[mask, idx] = 1
 
+        print("AH done!")
+        del houses, mask
         return res

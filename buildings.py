@@ -82,14 +82,13 @@ class Buildings(object):
             "schoolR1": [5312],
             "schoolR2": [5523, 5525],
             "schoolR3": [5340],
-            "etc": [6512, 6520, 6530, 6600, 5740,
-                    5760, 5600, 5700, 5202, 5253],
-            "religious": [5501, 5521]}
+            "etc": [6512, 6520, 6530, 6600, 5740, 5760, 5600, 5700, 5202, 5253],
+            "religious": [5501, 5521],
+        }
         for key, val in usg_dict.items():
             res[key] = torch.Tensor([False]).bool()
             for usg in val:
                 res[key] = res[key] | (self.usg["specific"] == usg)
-            res[key] = torch.nonzero(res[key]).long().view(-1)
-            res[key] = self.identity["id"][res[key]]
+            res[key] = self.identity["id"][res[key].bool().view(-1)]
         res["etcR"] = torch.cat((res["etc"], res["religious"]))
         return res

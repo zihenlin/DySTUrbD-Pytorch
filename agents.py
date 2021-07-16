@@ -86,10 +86,12 @@ class Agents(object):
         masks = {"child": group == 1, "adult": group == 2, "elderly": group == 3}
         lower = {"child": 1, "adult": 19, "elderly": 66}
         upper = {"child": 18, "adult": 65, "elderly": 90}
-        res = torch.zeros((group.shape[0],)).long()
+        res = torch.zeros((group.shape[0],)).byte()
 
         for k, v in masks.items():
-            res[v] = torch.randint(lower[k], upper[k], (v.count_nonzero().item(),))
+            res[v] = torch.randint(
+                lower[k], upper[k], (v.count_nonzero().item(),)
+            ).byte()
 
         return res
 
@@ -105,10 +107,10 @@ class Agents(object):
         ---------
         res     : torch.Tensor
         """
-        res = torch.zeros((house.shape[0],)).long()
+        res = torch.zeros((house.shape[0],)).bool()
         house_id = house.unique()
         house_num = house_id.shape[0]
-        is_religious = torch.randint(0, 2, (house_num,))
+        is_religious = torch.randint(0, 2, (house_num,)).bool()
 
         for idx in range(house_num):
             mask = house == house_id[idx]
@@ -132,7 +134,7 @@ class Agents(object):
         """
         res = dict()
 
-        res["house"] = util.load_csv(path, cols=[1]).view(-1)
+        res["house"] = util.load_csv(path, cols=[1]).view(-1).int()
 
         return res
 
@@ -221,7 +223,7 @@ class Agents(object):
 
         job_floor = b.floor["volume"][:, None] * job_density
         land_use = b.land["initial"].view(-1, 1).long()
-        job_num = torch.gather(job_floor, 1, land_use).long()
+        job_num = torch.gather(job_floor, 1, land_use).int()
         total = torch.sum(job_num).item()
 
         res["income"] = torch.zeros((total,))
@@ -234,7 +236,7 @@ class Agents(object):
             if val.item() == 0:
                 continue
             else:
-                num = val.long().item()
+                num = val.item()
             res["income"][cnt : cnt + num] = torch.normal(avg, std, size=(num,))
             res["building"][cnt : cnt + num] = b.identity["id"][idx].expand(num)
             cnt += num
@@ -259,14 +261,14 @@ class Agents(object):
         num_a = mask.count_nonzero()  # number of agents
         idx_a = torch.nonzero(mask)
         limit = num_j if num_j < num_a else num_a
-        random = torch.randperm(num_a).long()
-        res = torch.zeros((mask.shape[0],)).long()
+        random = torch.randperm(num_a).int()
+        res = torch.zeros((mask.shape[0],)).int()
 
         while limit > 0:
             idx_j = torch.nonzero(jobs["vacant"])  # index of vacancies
             agent = idx_a[random[limit - 1]]  # randomly pick a work
             job = jobs["income"][idx_j].sub(j["income"][agent]).abs().argmin()
-            res[agent] = jobs["id"][idx_j[job]]  # assign
+            res[agent] = jobs["id"][idx_j[job]].int()  # assign
             j["income"][agent] = jobs["income"][idx_j[job]]  # update income
             jobs["vacant"][idx_j[job]] = 0
             mask[agent] = 0
