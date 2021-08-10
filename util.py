@@ -107,7 +107,7 @@ import torch
 #     return load_csv(infection), load_csv(admission), load_csv(mortality)
 
 
-def load_csv(csvFile, cols=None, preprocess=None):
+def load_csv(csvFile, device, cols=None, preprocess=None, nrows=None):
     """
     This function loads data from given csv path.
     Params  : csvFile (str), cols (list)
@@ -115,7 +115,10 @@ def load_csv(csvFile, cols=None, preprocess=None):
     Fail    : Raise exception and halt
     """
     try:
-        csvData = pd.read_csv(csvFile, header=None, usecols=cols)
+        if nrows is None:
+            csvData = pd.read_csv(csvFile, header=None, usecols=cols)
+        else:
+            csvData = pd.read_csv(csvFile, header=None, usecols=cols, nrows=nrows)
         if cols is not None:
             csvData = csvData[cols]  # Preserve positional order
         if preprocess is not None:
@@ -124,7 +127,7 @@ def load_csv(csvFile, cols=None, preprocess=None):
         print("Unable to load data ", csvFile, ":", e)
         raise
     try:
-        return torch.Tensor(csvData.to_numpy())
+        return torch.Tensor(csvData.to_numpy()).to(device)
     except Exception as e:
         print("Unable to proceed: ", e)
         raise

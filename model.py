@@ -22,8 +22,11 @@ class DySTUrbD_Epi(object):
         ---------
         args : arguments
         """
-        self.buildings = buildings.Buildings(args.buildings_dir)
-        self.agents = agents.Agents(args, self.buildings)
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # print(self.device)
+        # exit()
+        self.buildings = buildings.Buildings(args.buildings_dir, self.device)
+        self.agents = agents.Agents(args, self.buildings, self.device)
         self.network = self.__create_network()
 
     def __create_network(self):
@@ -83,7 +86,7 @@ class DySTUrbD_Epi(object):
 
         res = scores.div(torch.sum(scores, 1))
         res[res < threshold] = 0
-        res = -torch.log(res)
+        res = -torch.log(res)  # Nan/null
 
         print("BB done!")
 
@@ -134,7 +137,7 @@ class DySTUrbD_Epi(object):
         j = self.agents.job
         h_unique = torch.unique(h)
         agent_hh = (h_unique[:, None] == h).long().argmax(dim=0)
-        h_income = torch.zeros((h_unique.shape[0],))
+        h_income = torch.zeros((h_unique.shape[0],), device=self.device)
 
         for idx in range(h_unique.shape[0]):
             mask = (h == h_unique[idx]) & (j["status"] == 1)
@@ -207,7 +210,9 @@ class DySTUrbD_Epi(object):
         """
         agents = self.agents.building["anchor"]
         anchors = torch.unique(agents)
-        res = torch.zeros((agents.shape[0], anchors.shape[0])).bool()
+        res = torch.zeros(
+            (agents.shape[0], anchors.shape[0]), device=self.device
+        ).bool()
 
         for idx in range(anchors.shape[0]):
             mask = agents == anchors[idx]
@@ -239,7 +244,7 @@ class DySTUrbD_Epi(object):
         """
         agents = self.agents.building["house"]
         houses = torch.unique(agents)
-        res = torch.zeros((agents.shape[0], houses.shape[0])).bool()
+        res = torch.zeros((agents.shape[0], houses.shape[0]), device=self.device).bool()
 
         for idx in range(houses.shape[0]):
             mask = agents == houses[idx]

@@ -27,7 +27,7 @@ class Buildings(object):
     status              : open or close
     """
 
-    def __init__(self, path):
+    def __init__(self, path, device):
         """
         Initialize buildings.
 
@@ -35,7 +35,10 @@ class Buildings(object):
         ----------
         args : arguments
         """
-        data = util.load_csv(path, cols=[6, 2, 3, 12, 4, 2, 14, 15, 17, 18])
+        self.device = device
+        data = util.load_csv(
+            path, self.device, cols=[6, 2, 3, 12, 4, 2, 14, 15, 17, 18], nrows=100
+        )
         self.identity = {
             "id": data[:, 0],
             "area": data[:, 3],
@@ -45,7 +48,7 @@ class Buildings(object):
         self.usg = {"broad": data[:, 8], "specific": data[:, 9]}
         self.land = {"initial": data[:, 5], "current": data[:, 1]}
         self.floor = {"number": data[:, 2], "volume": data[:, 4]}
-        self.status = torch.ones((data.shape[0],))
+        self.status = torch.ones((data.shape[0],), device=self.device)
         self.activity = self._create_activity()
 
     def _create_activity(self):
@@ -86,7 +89,7 @@ class Buildings(object):
             "religious": [5501, 5521],
         }
         for key, val in usg_dict.items():
-            res[key] = torch.Tensor([False]).bool()
+            res[key] = torch.Tensor([False]).bool().to(self.device)
             for usg in val:
                 res[key] = res[key] | (self.usg["specific"] == usg)
             res[key] = self.identity["id"][res[key].bool().view(-1)]

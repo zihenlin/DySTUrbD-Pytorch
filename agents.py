@@ -29,7 +29,7 @@ class Agents(object):
     status              : Contagious status
     """
 
-    def __init__(self, args, b):
+    def __init__(self, args, b, device):
         """
         Initialize attributes.
 
@@ -39,10 +39,11 @@ class Agents(object):
         b : initialized building objects
         """
         path = args.agents_dir
+        self.device = device
         self.identity = self._init_identity(path)
         self.building, self.job = self._init_building_activity(path, b)
         self.risk = self._init_risk(args, self.identity["age"])
-        self.timestamp = dict()
+        self.timestamp = dict()  # add sick period
         self.status = self._init_status()
 
     def _init_identity(self, path):
@@ -60,7 +61,7 @@ class Agents(object):
         --------
         res     : dict
         """
-        data = util.load_csv(path, cols=[0, 11, 2, 6])
+        data = util.load_csv(path, self.device, cols=[0, 11, 2, 6], nrows=100)
         keys = ["id", "house", "disable", "group"]
         res = dict()
 
@@ -86,11 +87,11 @@ class Agents(object):
         masks = {"child": group == 1, "adult": group == 2, "elderly": group == 3}
         lower = {"child": 1, "adult": 19, "elderly": 66}
         upper = {"child": 18, "adult": 65, "elderly": 90}
-        res = torch.zeros((group.shape[0],)).byte()
+        res = torch.zeros((group.shape[0],), device=self.device).byte()
 
         for k, v in masks.items():
             res[v] = torch.randint(
-                lower[k], upper[k], (v.count_nonzero().item(),)
+                lower[k], upper[k], (v.count_nonzero().item(),), device=self.device
             ).byte()
 
         return res
@@ -107,10 +108,10 @@ class Agents(object):
         ---------
         res     : torch.Tensor
         """
-        res = torch.zeros((house.shape[0],)).bool()
+        res = torch.zeros((house.shape[0],), device=self.device).bool()
         house_id = house.unique()
         house_num = house_id.shape[0]
-        is_religious = torch.randint(0, 2, (house_num,)).bool()
+        is_religious = torch.randint(0, 2, (house_num,), device=self.device).bool()
 
         for idx in range(house_num):
             mask = house == house_id[idx]
@@ -134,7 +135,9 @@ class Agents(object):
         """
         res = dict()
 
-        res["house"] = util.load_csv(path, cols=[1]).view(-1).int()
+        res["house"] = (
+            util.load_csv(path, self.device, cols=[1], nrows=100).view(-1).int()
+        )
 
         return res
 
@@ -154,7 +157,7 @@ class Agents(object):
         --------
         res     : dict
         """
-        data = util.load_csv(path, cols=[3, 12, 10])
+        data = util.load_csv(path, self.device, cols=[3, 12, 10], nrows=100)
         keys = ["status", "local", "income"]
         mask = ~(self.identity["group"] == 1)
         res = dict()
@@ -217,7 +220,9 @@ class Agents(object):
         res     : dict
         """
         res = dict()
-        job_density = torch.Tensor([0, 0.0004733, 0, 0.0315060, 0.0479474])
+        job_density = torch.Tensor([0, 0.0004733, 0, 0.0315060, 0.0479474]).to(
+            self.device
+        )
         avg = 7177.493  # average income
         std = 1624.297  # standard income
 
@@ -226,10 +231,10 @@ class Agents(object):
         job_num = torch.gather(job_floor, 1, land_use).int()
         total = torch.sum(job_num).item()
 
-        res["income"] = torch.zeros((total,))
-        res["building"] = torch.zeros((total,))
-        res["vacant"] = torch.ones((total,))
-        res["id"] = torch.arange(total) + 1
+        res["income"] = torch.zeros((total,), device=self.device)
+        res["building"] = torch.zeros((total,), device=self.device)
+        res["vacant"] = torch.ones((total,), device=self.device)
+        res["id"] = torch.arange(total, device=self.device) + 1
 
         cnt = 0
         for idx, val in enumerate(job_num):
@@ -237,7 +242,9 @@ class Agents(object):
                 continue
             else:
                 num = val.item()
-            res["income"][cnt : cnt + num] = torch.normal(avg, std, size=(num,))
+            res["income"][cnt : cnt + num] = torch.normal(
+                avg, std, size=(num,), device=self.device
+            )
             res["building"][cnt : cnt + num] = b.identity["id"][idx].expand(num)
             cnt += num
 
@@ -261,8 +268,8 @@ class Agents(object):
         num_a = mask.count_nonzero()  # number of agents
         idx_a = torch.nonzero(mask)
         limit = num_j if num_j < num_a else num_a
-        random = torch.randperm(num_a).int()
-        res = torch.zeros((mask.shape[0],)).int()
+        random = torch.randperm(num_a, device=self.device).int()
+        res = torch.zeros((mask.shape[0],), device=self.device).int()
 
         while limit > 0:
             idx_j = torch.nonzero(jobs["vacant"])  # index of vacancies
@@ -330,12 +337,14 @@ class Agents(object):
         ---------
         res     : torch.Tensor
         """
-        res = torch.zeros((idx["job"].shape[0],))
+        res = torch.zeros((idx["job"].shape[0],), device=self.device)
         has_job = torch.nonzero(idx["job"])
 
         for agent in has_job:
             mask = jobs["id"] == idx["job"][agent]
             res[agent] = jobs["building"][torch.nonzero(mask)]
+
+        "====================================================="
 
         anchor = [x for x in idx.keys() if "school" in x]
         anchor.append("remaining")
@@ -354,13 +363,13 @@ class Agents(object):
                 num_a = agents.shape[0]
                 building = a[key[v]]
                 num_b = building.shape[0]
-                random = torch.randint(num_b, size=(num_a,))
-
-                for i in range(num_a):
-                    res[agents[i]] = building[random[i]]
-                if key == "remaining":
-                    mask = torch.randint(2, size=(num_a,))
-                    res[agents] *= mask
+                if num_b != 0:
+                    random = torch.randint(num_b, size=(num_a,), device=self.device)
+                    for i in range(num_a):
+                        res[agents[i]] = building[random[i]]
+                    if key == "remaining":
+                        mask = torch.randint(2, size=(num_a,), device=self.device)
+                        res[agents] *= mask
 
         return res
 
@@ -377,7 +386,7 @@ class Agents(object):
         ---------
         res     : torch.Tensor
         """
-        res = torch.zeros((idx["job"].shape[0],))
+        res = torch.zeros((idx["job"].shape[0],), device=self.device)
         etc = [x for x in idx.keys() if "etc" in x]
         for key in etc:
             val = idx[key]
@@ -385,11 +394,12 @@ class Agents(object):
             num_a = agents.shape[0]
             building = a[key]
             num_b = building.shape[0]
-            random = torch.randint(num_b, size=(num_a,))
-            for i in range(num_a):
-                res[agents[i]] = building[random[i]]
-            mask = torch.randint(2, size=(num_a,))
-            res[agents] *= mask
+            if num_b != 0:
+                random = torch.randint(num_b, size=(num_a,), device=self.device)
+                for i in range(num_a):
+                    res[agents[i]] = building[random[i]]
+                mask = torch.randint(2, size=(num_a,), device=self.device)
+                res[agents] *= mask
 
         return res
 
@@ -407,20 +417,23 @@ class Agents(object):
         """
         res = dict()
         risks = {
-            "infection": util.load_csv(args.infection_dir),
-            "admission": util.load_csv(args.admission_dir),
-            "mortality": util.load_csv(args.mortality_dir),
+            "infection": util.load_csv(args.infection_dir, self.device),
+            "admission": util.load_csv(args.admission_dir, self.device),
+            "mortality": util.load_csv(args.mortality_dir, self.device),
         }
         for key, val in risks.items():
-            risk = torch.zeros((age.shape[0],))
+            risk = torch.zeros((age.shape[0],), device=self.device)
             for row in val:
                 mask = (age >= row[0]) & (age < row[1])
                 risk[mask] = torch.normal(
-                    row[2], row[3], (mask.count_nonzero().item(),)
+                    row[2],
+                    row[3],
+                    (mask.count_nonzero().item(),),
+                    device=self.device,
                 )
             risk[risk < 0] = 0
             res[key] = risk
-        res["exposure"] = torch.rand(age.shape[0])
+        res["exposure"] = torch.rand(age.shape[0], device=self.device)
 
         return res
 
@@ -437,8 +450,8 @@ class Agents(object):
         res : torch.Tensor
         """
         num = self.identity["id"].shape[0]
-        res = torch.ones((num))
-        infected = torch.randperm(num)[:20]
+        res = torch.ones((num), device=self.device)
+        infected = torch.randperm(num, device=self.device)[:20]
         res[infected] = 2
 
         return res
