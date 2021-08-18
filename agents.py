@@ -86,7 +86,7 @@ class Agents(object):
         """
         masks = {"child": group == 1, "adult": group == 2, "elderly": group == 3}
         lower = {"child": 1, "adult": 19, "elderly": 66}
-        upper = {"child": 18, "adult": 65, "elderly": 90}
+        upper = {"child": 19, "adult": 66, "elderly": 91}
         res = torch.zeros((group.shape[0],), device=self.device).byte()
 
         for k, v in masks.items():
@@ -135,8 +135,8 @@ class Agents(object):
         """
         res = dict()
 
-        res["house"] = (
-            util.load_csv(path, self.device, cols=[1], nrows=100).view(-1).int()
+        res["house"] = torch.round(
+            util.load_csv(path, self.device, cols=[1], nrows=100).view(-1)
         )
 
         return res
@@ -227,8 +227,10 @@ class Agents(object):
         std = 1624.297  # standard income
 
         job_floor = b.floor["volume"][:, None] * job_density
-        land_use = b.land["initial"].view(-1, 1).long()
-        job_num = torch.gather(job_floor, 1, land_use).int()
+        land_use = b.land["initial"].view(-1, 1)
+        land_use = torch.round(land_use).long()
+        job_num = torch.gather(job_floor, 1, land_use)
+        job_num = torch.round(job_num).int()
         total = torch.sum(job_num).item()
 
         res["income"] = torch.zeros((total,), device=self.device)
@@ -268,14 +270,14 @@ class Agents(object):
         num_a = mask.count_nonzero()  # number of agents
         idx_a = torch.nonzero(mask)
         limit = num_j if num_j < num_a else num_a
-        random = torch.randperm(num_a, device=self.device).int()
-        res = torch.zeros((mask.shape[0],), device=self.device).int()
+        random = torch.randperm(num_a, device=self.device)
+        res = torch.zeros((mask.shape[0],), device=self.device, dtype=torch.int64)
 
         while limit > 0:
             idx_j = torch.nonzero(jobs["vacant"])  # index of vacancies
             agent = idx_a[random[limit - 1]]  # randomly pick a work
             job = jobs["income"][idx_j].sub(j["income"][agent]).abs().argmin()
-            res[agent] = jobs["id"][idx_j[job]].int()  # assign
+            res[agent] = jobs["id"][idx_j[job]]  # assign
             j["income"][agent] = jobs["income"][idx_j[job]]  # update income
             jobs["vacant"][idx_j[job]] = 0
             mask[agent] = 0
@@ -347,29 +349,22 @@ class Agents(object):
         "====================================================="
 
         anchor = [x for x in idx.keys() if "school" in x]
-        anchor.append("remaining")
-        etc = [x for x in idx.keys() if "etc" in x]
+        anchor += [x for x in idx.keys() if "etc" in x]
 
         for key in anchor:
-            if key == "remaining":
-                key = etc
-                val = [(res == 0) & idx[x] for x in etc]
-            else:
-                val = [idx[key]]
-                key = [key]
 
-            for v in range(len(val)):
-                agents = torch.nonzero(val[v]).view(-1)
-                num_a = agents.shape[0]
-                building = a[key[v]]
-                num_b = building.shape[0]
-                if num_b != 0:
-                    random = torch.randint(num_b, size=(num_a,), device=self.device)
-                    for i in range(num_a):
-                        res[agents[i]] = building[random[i]]
-                    if key == "remaining":
-                        mask = torch.randint(2, size=(num_a,), device=self.device)
-                        res[agents] *= mask
+            val = (res == 0) & idx[key] if "etc" in key else idx[key]
+            agents = torch.nonzero(val).view(-1)
+            num_a = agents.shape[0]
+            building = a[key]
+            num_b = building.shape[0]
+            if num_b != 0:
+                random = torch.randint(num_b, size=(num_a,), device=self.device)
+                for i in range(num_a):
+                    res[agents[i]] = building[random[i]]
+            if "etc" in key:
+                mask = torch.randint(2, size=(num_a,), device=self.device)
+                res[agents] *= mask
 
         return res
 
@@ -398,8 +393,8 @@ class Agents(object):
                 random = torch.randint(num_b, size=(num_a,), device=self.device)
                 for i in range(num_a):
                     res[agents[i]] = building[random[i]]
-                mask = torch.randint(2, size=(num_a,), device=self.device)
-                res[agents] *= mask
+            mask = torch.randint(2, size=(num_a,), device=self.device)
+            res[agents] *= mask
 
         return res
 
