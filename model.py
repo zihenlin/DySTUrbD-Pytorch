@@ -6,6 +6,7 @@ This program is the implementation of DySTUrbD-Epi class.
 """
 
 import torch
+from scipy.sparse.csgraph import shortest_path as sp
 
 import buildings
 import agents
@@ -40,14 +41,43 @@ class DySTUrbD_Epi(object):
 
         Return
         --------
-        res : dict
+        res : Tensor (A + B, A + B)
         """
-        res = {
-            "BB": self.__building_building(),
-            "AA": self.__agent_agent(),
-            "Aa": self.__agent_anchor(),
-            "AH": self.__agent_house(),
-        }
+
+        """
+        Schematic illustration of getting (A+B,A+B) from (A,A), (A,B), (A,B)^T, (B,B)
+
+        let A = 3, B = 2
+            A              B
+         ------           ----
+         |= = =           |= =
+        A|=   =  concat  A|= =
+         |= = =           |= =
+
+                 concat
+
+         |= = =           |= =
+        B|= = =  concat  B|= =
+         ------           ----
+            A               B
+
+        """
+
+        BB = self.__building_building()
+        AA = self.__agent_agent()
+        Aa = self.__agent_anchor()
+        AH = self.__agent_house()
+        AB = Aa.add(AH)
+        BA = AB.transpose(0, 1)
+
+        AAAB = torch.cat((AA, AB), 1)
+        BABB = torch.cat((BB, BA), 1)
+        res = torch.cat((AAAB, BABB), 0)
+
+        res = sp(res.detach().cpu().numpy(), directed=True, return_predecessors=False)
+        res = torch.from_numpy(res).to(self.device)
+        res = torch.nan_to_num(res, posinf=10)
+        res = res.fill_diagonal_(10)
 
         return res
 
@@ -78,14 +108,12 @@ class DySTUrbD_Epi(object):
             dim=1,
         )
         distance = torch.cdist(coor, coor).pow(beta)
-        distance[distance == 0] = 1e6
+        distance[distance == 0] = 1e-6
         scores = vol.div(distance)
-
-        for i in range(coor.shape[0]):
-            scores[i, i] = 0
+        scores = scores.fill_diagonal_(0)
 
         res = scores.div(torch.sum(scores, 1))
-        res[res < threshold] = 0
+        res[res < threshold] = 1e-3
         res = -torch.log(res)  # Nan/null
 
         print("BB done!")
@@ -119,7 +147,7 @@ class DySTUrbD_Epi(object):
 
         h = self.agents.identity["house"]
         res[h == h.view(-1, 1)] = 1  # same house gets max probability
-        res[res < threshold] = 0
+        res[res < threshold] = 1
         res = -torch.log(res)
         print("AA done!")
 
@@ -210,14 +238,14 @@ class DySTUrbD_Epi(object):
         """
         agents = self.agents.building["anchor"]
         anchors = torch.unique(agents)
-        res = torch.zeros(
-            (agents.shape[0], anchors.shape[0]), device=self.device
-        ).bool()
+        num_b = self.buildings.identity["id"].shape[0]
+        res = torch.zeros((agents.shape[0], num_b), device=self.device)
 
         for idx in range(anchors.shape[0]):
             mask = agents == anchors[idx]
             res[mask, idx] = 1
 
+        res = -torch.log(res)
         print("Aa done!")
         del anchors, mask
         return res
@@ -244,12 +272,14 @@ class DySTUrbD_Epi(object):
         """
         agents = self.agents.building["house"]
         houses = torch.unique(agents)
-        res = torch.zeros((agents.shape[0], houses.shape[0]), device=self.device).bool()
+        num_b = self.buildings.identity["id"].shape[0]
+        res = torch.zeros((agents.shape[0], num_b), device=self.device)
 
         for idx in range(houses.shape[0]):
             mask = agents == houses[idx]
             res[mask, idx] = 1
 
+        res = -torch.log(res)
         print("AH done!")
         del houses, mask
         return res
