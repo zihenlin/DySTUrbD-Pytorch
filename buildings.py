@@ -20,7 +20,7 @@ class Buildings(object):
 
     Attributes
     ----------
-    identity            : Identities of the agents.
+    identity            : identity of buildings.
     usg                 : USG codes.
     land                : landuse.
     floor               : floor properties
@@ -37,9 +37,10 @@ class Buildings(object):
         """
         self.device = device
         data = util.load_csv(
-            path, self.device, cols=[6, 2, 3, 12, 4, 2, 14, 15, 17, 18], nrows=100
+            path, self.device, cols=[6, 2, 3, 12, 4, 2, 14, 15, 17, 18], nrows=1000
         )
         self.identity = {
+            "idx": torch.arange(data.shape[0]),
             "id": data[:, 0],
             "area": data[:, 3],
             "X": data[:, 6],
@@ -92,6 +93,7 @@ class Buildings(object):
             res[key] = torch.Tensor([False]).bool().to(self.device)
             for usg in val:
                 res[key] = res[key] | (self.usg["specific"] == usg)
-            res[key] = self.identity["id"][res[key].bool().view(-1)]
+            res[key] = self.identity["idx"][res[key].view(-1)]
+
         res["etcR"] = torch.cat((res["etc"], res["religious"]))
         return res

@@ -16,6 +16,7 @@ def epi_run(args):
     This function runs epidemiological model.
     """
     model = DySTUrbD_Epi(args)
+    model()
 
 
 if __name__ == "__main__":

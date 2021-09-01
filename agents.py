@@ -61,7 +61,7 @@ class Agents(object):
         --------
         res     : dict
         """
-        data = util.load_csv(path, self.device, cols=[0, 11, 2, 6], nrows=100)
+        data = util.load_csv(path, self.device, cols=[0, 11, 2, 6], nrows=1000)
         keys = ["id", "house", "disable", "group"]
         res = dict()
 
@@ -119,7 +119,7 @@ class Agents(object):
 
         return res
 
-    def _load_house(self, path):
+    def _load_house(self, path, b):
         """
         Initialize buildings.
 
@@ -128,6 +128,7 @@ class Agents(object):
         Paramter
         --------
         path    : str
+        b       : Buildings object
 
         Return
         --------
@@ -136,8 +137,11 @@ class Agents(object):
         res = dict()
 
         res["house"] = torch.round(
-            util.load_csv(path, self.device, cols=[1], nrows=100).view(-1)
+            util.load_csv(path, self.device, cols=[1], nrows=1000).view(-1)
         )
+        for idx in range(b.identity["idx"].shape[0]):
+            mask = res["house"] == b.identity["id"][idx]
+            res["house"][mask] = idx
 
         return res
 
@@ -157,7 +161,7 @@ class Agents(object):
         --------
         res     : dict
         """
-        data = util.load_csv(path, self.device, cols=[3, 12, 10], nrows=100)
+        data = util.load_csv(path, self.device, cols=[3, 12, 10], nrows=1000)
         keys = ["status", "local", "income"]
         mask = ~(self.identity["group"] == 1)
         res = dict()
@@ -193,7 +197,7 @@ class Agents(object):
         b : dict (building)
         j : dict (jobs)
         """
-        b = self._load_house(path)
+        b = self._load_house(path, buildings)
         j = self._load_employ(path)
 
         jobs = self._create_job(buildings)
@@ -234,9 +238,9 @@ class Agents(object):
         total = torch.sum(job_num).item()
 
         res["income"] = torch.zeros((total,), device=self.device)
-        res["building"] = torch.zeros((total,), device=self.device)
+        res["building"] = torch.zeros((total,), device=self.device, dtype=torch.int64)
         res["vacant"] = torch.ones((total,), device=self.device)
-        res["id"] = torch.arange(total, device=self.device) + 1
+        res["id"] = torch.arange(total, device=self.device, dtype=torch.int64) + 1
 
         cnt = 0
         for idx, val in enumerate(job_num):
@@ -247,7 +251,7 @@ class Agents(object):
             res["income"][cnt : cnt + num] = torch.normal(
                 avg, std, size=(num,), device=self.device
             )
-            res["building"][cnt : cnt + num] = b.identity["id"][idx].expand(num)
+            res["building"][cnt : cnt + num] = idx
             cnt += num
 
         return res
@@ -339,12 +343,12 @@ class Agents(object):
         ---------
         res     : torch.Tensor
         """
-        res = torch.zeros((idx["job"].shape[0],), device=self.device)
+        res = torch.zeros((idx["job"].shape[0],), dtype=torch.int64, device=self.device)
         has_job = torch.nonzero(idx["job"])
 
         for agent in has_job:
             mask = jobs["id"] == idx["job"][agent]
-            res[agent] = jobs["building"][torch.nonzero(mask)]
+            res[agent] = jobs["building"][mask]
 
         "====================================================="
 
@@ -364,7 +368,7 @@ class Agents(object):
                     res[agents[i]] = building[random[i]]
             if "etc" in key:
                 mask = torch.randint(2, size=(num_a,), device=self.device)
-                res[agents] *= mask
+                res[agents] &= mask
 
         return res
 
@@ -381,7 +385,7 @@ class Agents(object):
         ---------
         res     : torch.Tensor
         """
-        res = torch.zeros((idx["job"].shape[0],), device=self.device)
+        res = torch.zeros((idx["job"].shape[0],), dtype=torch.int64, device=self.device)
         etc = [x for x in idx.keys() if "etc" in x]
         for key in etc:
             val = idx[key]
