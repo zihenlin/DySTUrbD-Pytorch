@@ -48,7 +48,9 @@ class DySTUrbD_Epi(object):
         """
         print("Get shortest path")
         dist = self._get_dist()
+        print("Calculate interaction probability")
         prob_AA = self._prob_AA(dist)
+        print("Creating routine")
         routine = self._get_routine(dist)
         print("DONE")
 
@@ -144,7 +146,7 @@ class DySTUrbD_Epi(object):
                     clone_bb = nodes_bb
                 else:
                     prev = candidates
-                    dummy_col = ~(choice.sum(0).bool())
+                    dummy_col = ~(choice.sum(1).bool())
                     nodes = torch.cat((choice, dummy_col.view(-1, 1)), 1)
                     dummy_row = torch.zeros((1, num_bb), device=self.device)
                     clone_bb = torch.cat((nodes_bb, dummy_row), 0)
