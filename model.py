@@ -6,12 +6,15 @@ This program is the implementation of DySTUrbD-Epi class.
 """
 
 import torch
-from scipy.sparse.csgraph import shortest_path as sp
 from scipy.sparse import csr_matrix
+import psutil
+from time import time
+import numpy as np
 
 import buildings
 import agents
 import networks
+import dijkstra_mp64  # multiprocess shortest path
 
 
 class DySTUrbD_Epi(object):
@@ -25,34 +28,50 @@ class DySTUrbD_Epi(object):
         ---------
         args : arguments
         """
+        self.time = time()
         print("Init start!")
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # self.device = "cpu"
         print("Current Device:", self.device)
 
-        print("Init buildings")
+        self.cpu = len(psutil.Process().cpu_affinity())
+        t1 = time()
+        print("Number of CPU:", self.cpu)
+
         self.buildings = buildings.Buildings(args.buildings_dir, self.device)
+        t2 = time()
+        print("Buildings:", t2 - t1)
 
-        print("Init agents")
         self.agents = agents.Agents(args, self.buildings, self.device)
+        t3 = time()
+        print("Agentss:", t3 - t2)
 
-        print("Init networks")
         self.network = networks.Networks(self.agents, self.buildings, self.device)
-
-        print("Init complete!")
+        t4 = time()
+        print("Networks:", t4 - t3)
+        print("Init Complete!")
+        print()
 
     def __call__(self):
         """
         Run the model, Gogogo!
         """
-        print("Get shortest path")
+        t1 = time()
+        print("Run the model, Gogogo!")
         dist = self._get_dist()
-        print("Calculate interaction probability")
+        t2 = time()
+        print("Shortest Path", t2 - t1)
+
         prob_AA = self._prob_AA(dist)
-        print("Creating routine")
+        t3 = time()
+        print("Interaction Prob:", t3 - t2)
+
         routine = self._get_routine(dist)
+        t4 = time()
+        print("Routine:", t4 - t3)
         print("DONE")
+        print()
+        print("Total:", t4 - self.time)
 
     def _get_dist(self):
         """
@@ -95,8 +114,8 @@ class DySTUrbD_Epi(object):
         col_idx = res.indices()[1].detach().cpu().numpy()
         val = -torch.log(res.values()).detach().cpu().numpy()
         csr = csr_matrix((val, (row_idx, col_idx)), shape=(dim, dim))
-        res = sp(csr, directed=True, return_predecessors=False)
 
+        res = dijkstra_mp64.multiSearch(csr, self.cpu)[0]
         res = torch.from_numpy(res).to(self.device)
         res = res.fill_diagonal_(float("inf"))
         # TODO got reasonable outcome but different result
