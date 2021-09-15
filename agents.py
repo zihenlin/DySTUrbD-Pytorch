@@ -24,7 +24,7 @@ class Agents(object):
     identity            : Identities of the agents.
     building            : Building IDs of the agents.
     job                 : Employment related information.
-    risk                : Risks of exposure, contagion, admission, mortality.
+    risk                : Risks of exposure, infection, admission, mortality.
     timestamp           : Relative start dates and period
     status              : Contagious status
     """
@@ -43,7 +43,8 @@ class Agents(object):
         self.identity = self._init_identity(path)
         self.building, self.job = self._init_building_activity(path, b)
         self.risk = self._init_risk(args, self.identity["age"])
-        self.timestamp = dict()  # add sick period
+        self.start = self._init_start_date(self)
+        self.period = self._init_period(self)
         self.status = self._init_status()
 
     def _init_identity(self, path):
@@ -370,7 +371,7 @@ class Agents(object):
                 mask = torch.randint(2, size=(num_a,), device=self.device)
                 res[agents] &= mask
 
-        return res
+        return re
 
     def _assign_trivial(self, idx, a):
         """
@@ -436,6 +437,36 @@ class Agents(object):
 
         return res
 
+    def _init_start_date(self):
+        """
+        Initalize sick, quarantine, admission start dates
+
+        Return
+        -------
+        res : dict
+        """
+        res = dict()
+        keys = ["sick", "quarantine", "admission"]
+        for key in keys:
+            res[key] = torch.zeros((self.identity["id"].shape[0],), device=self.device)
+
+        return res
+
+    def _init_period(self):
+        """
+        Initalize sick, quarantine, admission period
+
+        Return
+        -------
+        res : dict
+        """
+        res = dict()
+        keys = ["sick", "quarantine", "admission"]
+        for key in keys:
+            res[key] = torch.zeros((self.identity["id"].shape[0],), device=self.device)
+
+        return res
+
     def _init_status(self):
         """
         Initialize the status.
@@ -454,3 +485,156 @@ class Agents(object):
         res[infected] = 2
 
         return res
+
+    def set_interaction(self, prob_AA):
+        """
+        Set the interaction matrix of agents obtained from shortest path.
+
+        Parameter
+        ----------
+        prob_AA : torch.Tensor (A, A)
+        """
+        self.interaction = prob_AA
+
+    def set_routine(self, routine):
+        """
+        Set the routine of agents obtained from shortest path and updates.
+
+        Parameter
+        ----------
+        routine : torch.Tensor (A, A)
+        """
+        self.routine = routine
+
+    def get_infected(self):
+        """
+        Return mask of infected agents.
+
+        Return
+        -------
+        res : torch.Tensor
+        """
+        return (
+            (self.status == 2)
+            | (self.status == 4)
+            | (self.status == 5)
+            | (self.status == 6)
+        )
+
+    def get_quarantined(self):
+        """
+        Return mask of quarantinead agents.
+
+        Return
+        -------
+        res : torch.Tensor
+        """
+        return (self.status == 3) | (self.status == 4) | (self.status == 5)
+
+    def get_hospitalized(self):
+        """
+        Return mask of hospitalized agents.
+
+        Return
+        -------
+        res : torch.Tensor
+        """
+        return self.status == 6
+
+    def get_dead(self):
+        """
+        Return mask of dead agents.
+
+        Return
+        -------
+        res : torch.Tensor
+        """
+        return self.status == 8
+
+    def get_no_admit(self):
+        """
+        Return mask of agents who are not suitable to be hospitalized.
+
+        Status
+        -------
+        6. Hospitalized
+        7. Recovered
+        8. Dead
+
+        Return
+        -------
+        res : torch.Tensor
+        """
+        return (
+            (self.period["sick"] < 4) | (self.period["sick"] > 14) | (self.status >= 6)
+        )
+
+    def update_routine(self, b_status, network_house):
+        """
+        Update routine of quaratine, hospitalized, and dead agents.
+        """
+        a_qua = self.get_quarantined()
+        a_hos = self.get_hospitalized()
+        a_dead = self.get_dead()
+        self.routine *= b_status  # building open or close
+        self.routine[a_qua] = network_house[a_qua]
+        self.routine[a_hos] &= False
+        self.routine[a_dead] &= False
+
+    def update_period(self, day):
+        """
+        Update the periods of agents
+
+        Parameter
+        ---------
+        day : int
+        """
+        a_qua = self.get_quarantined()
+        a_hos = self.get_hospitalized()
+        a_dead = self.get_dead()
+        self.period["sick"][a_inf] = day - self.start["sick"]
+        self.period["quarantine"][a_qua] = day - self.start["quarantine"]
+        self.period["admission"][a_hos] = day - self.start["admission"]
+
+    def update_admission(self, day):
+        """
+        Update admission probability of agents and agent status if admitted.
+
+        Return
+        -------
+        res : int
+        """
+        a_no_admit = self.get_no_admit()
+        a_uninf = (self.status == 1) | (self.status == 3)
+        tmp_risk = self.risk["admission"]
+        tmp_risk *= ~(a_uninf | a_no_admit).int()  # remove admission risk
+        rand_risk = torch.zeros_like(tmp_risk).uniform_(0, 1)
+        admission = tmp_risk > rand_risk
+        self.update_status(admission, 6)
+        self.update_start(admission, "admission", day)
+        res = admission.count_nonzero()
+
+        return res
+
+    def update_status(self, mask, status):
+        """
+        Update status of selected agents
+
+        Parameter
+        ----------
+        mask : torch.Tensor (A, 1)
+        status : int
+        """
+        self.status[mask] = status
+
+    def update_start(self, mask, key, day):
+        """
+        Update start date of selected agents for the given key and day.
+
+        Parameter
+        ----------
+        mask : torch.Tensor (A, 1)
+        key : string
+        day : int
+        """
+        self.start[key][mask] = day

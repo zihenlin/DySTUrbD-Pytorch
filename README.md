@@ -30,13 +30,16 @@ The class attributes are listed for debugging convenience.
         3. admission
         4. mortality
 
-    timestamp           : Relative start dates and period
-        1. c_start      - contagion start
-        2. s_start      - sick start
-        3. q_start      - quarantine start
-        4. a_start      - admission start
-        5. q_period     - quarantine period
-        6. a_period     - admission period
+    start               : Relative start dates
+        1. contagiuos
+        2. sick
+        3. quarantine
+        4. admission
+
+    period              : Relative  period
+        1. sick
+        2. quarantine
+        3. admission
 
     status              : Contagious status
         1. Susceptible

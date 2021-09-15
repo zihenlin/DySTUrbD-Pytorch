@@ -37,7 +37,7 @@ class Buildings(object):
         """
         self.device = device
         data = util.load_csv(
-            path, self.device, cols=[6, 2, 3, 12, 4, 2, 14, 15, 17, 18], nrows=1000
+            path, self.device, cols=[6, 2, 3, 12, 4, 2, 14, 15, 17, 18], nrows=1200
         )
         self.identity = {
             "idx": torch.arange(data.shape[0]),
@@ -49,7 +49,7 @@ class Buildings(object):
         self.usg = {"broad": data[:, 8], "specific": data[:, 9]}
         self.land = {"initial": data[:, 5], "current": data[:, 1]}
         self.floor = {"number": data[:, 2], "volume": data[:, 4]}
-        self.status = torch.ones((data.shape[0],), device=self.device)
+        self.status = torch.ones((data.shape[0],), device=self.device, dtype=torch.bool)
         self.activity = self._create_activity()
 
     def _create_activity(self):

@@ -7,7 +7,7 @@ This program is the implementation of DySTUrbD-Epi class.
 
 import torch
 from scipy.sparse import csr_matrix
-import psutil
+import psutil  # get number of CPU cores
 from time import time
 import numpy as np
 
@@ -49,29 +49,29 @@ class DySTUrbD_Epi(object):
         self.network = networks.Networks(self.agents, self.buildings, self.device)
         t4 = time()
         print("Networks:", t4 - t3)
-        print("Init Complete!")
+
+        dist = self._get_dist()
+        t5 = time()
+        print("Shortest Path", t5 - t4)
+
+        prob_AA = self._prob_AA(dist)
+        self.agents.set_interaction(prob_AA)
+        t6 = time()
+        print("Interaction Prob:", t6 - t5)
+
+        routine = self._get_routine(dist)
+        self.agents.set_routine(routine)
+        t7 = time()
+        print("Routine:", t7 - t6)
+
         print()
+        print("Init Complete!")
 
     def __call__(self):
         """
         Run the model, Gogogo!
         """
-        t1 = time()
-        print("Run the model, Gogogo!")
-        dist = self._get_dist()
-        t2 = time()
-        print("Shortest Path", t2 - t1)
-
-        prob_AA = self._prob_AA(dist)
-        t3 = time()
-        print("Interaction Prob:", t3 - t2)
-
-        routine = self._get_routine(dist)
-        t4 = time()
-        print("Routine:", t4 - t3)
-        print("DONE")
-        print()
-        print("Total:", t4 - self.time)
+        self._simulate(routine, prob_AA)
 
     def _get_dist(self):
         """
@@ -182,3 +182,27 @@ class DySTUrbD_Epi(object):
                 res |= choice  # add new building to routine (some are zeros)
 
         return res
+
+    def _simulate(self, routine, prob_AA):
+        """
+        Simulate policy response.
+
+        status              : Contagious status
+        1. Susceptible
+        2. Infected, Undiagnosed
+        3. Quarantined, Uninfected
+        4. Quarantined, Infected, Undiagnosed
+        5. Quarantined, Infected, Diagnosed
+        6. Infected, Hospitalized
+        7. Recovered
+        8. Dead
+        """
+        num_inf = self.agents.get_infected.count_nonzero()
+        day = 0
+        while num_inf > 0:
+            self.agents.update_routine(self.buildings.status, self.network.AB["house"])
+            self.agents.update_period(day)
+            self.agents.update_admission(day)
+            # TODO calculate in-hospital mortalities based on github version
+
+            break
