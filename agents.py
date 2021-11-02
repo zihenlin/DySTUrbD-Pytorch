@@ -433,7 +433,6 @@ class Agents(object):
                 )
             risk[risk < 0] = 0
             res[key] = risk
-        res["exposure"] = torch.rand(age.shape[0], device=self.device)
 
         return res
 
@@ -569,6 +568,16 @@ class Agents(object):
             (self.period["sick"] < 4) | (self.period["sick"] > 14) | (self.status >= 6)
         )
 
+    def get_no_death(self):
+        """
+        Return mask of agents who unlikely to die.
+
+        Return
+        -------
+        res : torch.Tensor
+        """
+        return self.period["admission"] < 3
+
     def update_routine(self, b_status, network_house):
         """
         Update routine of quaratine, hospitalized, and dead agents.
@@ -576,10 +585,13 @@ class Agents(object):
         a_qua = self.get_quarantined()
         a_hos = self.get_hospitalized()
         a_dead = self.get_dead()
-        self.routine *= b_status  # building open or close
-        self.routine[a_qua] = network_house[a_qua]
-        self.routine[a_hos] &= False
-        self.routine[a_dead] &= False
+        res = self.routine
+        res *= b_status  # building open or close
+        res[a_qua] = network_house[a_qua]
+        res[a_hos] &= False
+        res[a_dead] &= False
+
+        return res
 
     def update_period(self, day):
         """
@@ -599,6 +611,10 @@ class Agents(object):
     def update_admission(self, day):
         """
         Update admission probability of agents and agent status if admitted.
+
+        Parameter
+        ---------
+        day : int
 
         Return
         -------
@@ -638,3 +654,71 @@ class Agents(object):
         day : int
         """
         self.start[key][mask] = day
+
+    def update_death(self):
+        """
+        Update dead probability of agents and agent status if died.
+
+        Return
+        -------
+        res : int
+        """
+        a_no_death = self.get_no_death()
+        a_unhos = self.status != 6
+        tmp_risk = self.risk["mortality"]
+        tmp_risk *= ~(a_unhos | a_no_death).int()  # remove admission risk
+        rand_risk = torch.zeros_like(tmp_risk).uniform_(0, 1)
+        death = tmp_risk > rand_risk
+        self.update_status(death, 8)
+        res = death.count_nonzero()
+
+        return res
+
+    def update_infection(self, day, routine):
+        """
+        Update infection probability of agents and agent status if infected.
+
+        Parameter
+        ---------
+        day : int
+
+        Return
+        -------
+        res1 : number of newly infected (not quarantined) agent
+        res2 : number of newly infected and quarantined agent
+        """
+        a_inf = self.get_infected()
+        b_inf = (
+            routine[a_inf].sum(1).bool()
+        )  # get a list of buildings visited by infected agents
+        a_exposed = (routine.add(b_inf) == 2).sum(
+            1
+        ) & ~a_inf  # uninfected agents visited same buildings
+
+        alpha = (4.5 / 3.5) ** 2
+        beta = 4.5 / (3.5 ** 2)  # 1 / scale
+        distribution = torch.distributions.gamma.Gamma(alpha, beta)
+        distribution.support = torch.distributions.constraints.greater_than_eq(0)
+        contagious_strength = distribution.log.prob(self.agents.period["sick"]).exp()
+
+        tmp_risk = self.interaction * contagious_strength
+        # TODO filter each row using infected agent
+        tmp_risk *= self.risk["infection"].view(-1, 1)
+        tmp_risk *= a_exposed.view(-1, 1)  # only exposed agents
+        tmp_risk *= 0.08  # normalize factor
+        rand_risk = torch.zeros_like(tmp_risk).uniform_(0, 1)
+        infection = tmp_risk > rand_risk
+        a_qua = self.get_quarantined()
+
+        inf_qua = infection & a_qua
+        inf_no_qua = infection & ~a_qua
+
+        self.update_status(inf_no_qua, 2)
+        self.update_start(inf_no_qua, "sick", day)
+        self.update_status(inf_qua, 5)
+        self.update_start(inf_qua, "sick", day)
+
+        # TODO understand how to implement infection chain
+        res1 = inf_qua.count_nonzero()
+        res2 = inf_no_qua.count_nonzero()
+        return res, res2

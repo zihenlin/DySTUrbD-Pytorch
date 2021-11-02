@@ -71,7 +71,7 @@ class DySTUrbD_Epi(object):
         """
         Run the model, Gogogo!
         """
-        self._simulate(routine, prob_AA)
+        self._simulate()
 
     def _get_dist(self):
         """
@@ -144,37 +144,41 @@ class DySTUrbD_Epi(object):
         -------
         res : torch.Tensor (A, B)
         """
-        num_aa = self.network.AA.shape[0]
-        num_bb = self.network.BB.shape[0]
-        dist_ab = 1
-        dist_bb = 6
+        num_aa = self.network.AA.shape[0]  # total number of agents
+        num_bb = self.network.BB.shape[0]  # total number of buildings
+        dist_ab = 1  # Given distance threshold for AB network
+        dist_bb = 6  # Given distance threshold for BB network
 
         nodes_ab = dist[:num_aa, -num_bb:] < dist_ab  # a_nodes (A,B)
         nodes_bb = dist[-num_bb:, -num_bb:] < dist_bb  # all buildings (A,B,B)
+        dummy_bb = torch.zeros((1, num_bb), device=self.device)  # empty row
+        nodes_bb = torch.cat((nodes_bb, dummy_row), 0)
 
         res = self.network.AB["total"]
-        regular = ["house", "anchor", "trivial"]
+        start = ["house", "anchor", "trivial"]
+        end = ["anchor", "trivial", "house"]
 
-        for b in regular:
+        for s, e in zip(start, end):
+            nodes_end = self.network.AB[e]
+            dummy_end = ~(nodes_end.sum(1).bool())  # point to empty row
+            nodes_end = torch.cat((nodes_end, dummy_end.view(-1, 1)), 1)
+            idx_end = nodes_end.long().argmax(
+                dim=1
+            )  # get the end building index for each agent
+            near_end = nodes_bb.index_select(0, idx_end).bool()
             for cnt in range(2):
                 template = torch.zeros_like(self.network.AB["total"])
 
-                if cnt < 1:
-                    prev = nodes_ab
-                    nodes = self.network.AB[b]
-                    clone_bb = nodes_bb
-                else:
-                    prev = candidates
-                    dummy_col = ~(choice.sum(1).bool())
-                    nodes = torch.cat((choice, dummy_col.view(-1, 1)), 1)
-                    dummy_row = torch.zeros((1, num_bb), device=self.device)
-                    clone_bb = torch.cat((nodes_bb, dummy_row), 0)
-
-                idx = nodes.long().argmax(
+                nodes_start = self.network.AB[s] if cnt < 1 else choice
+                dummy_start = ~(nodes_start.sum(1).bool())  # point to empty row
+                nodes_start = torch.cat((nodes_start, dummy_start.view(-1, 1)), 1)
+                idx_start = nodes_start.long().argmax(
                     dim=1
-                )  # get the building index for each agent
-                candidates = clone_bb.index_select(0, idx).bool()
-                candidates = (candidates | prev) & ~(self.network.AB["total"])
+                )  # get the start building index for each agent
+                near_start = nodes_bb.index_select(0, idx_start).bool()
+
+                candidates = near_start & near_end  # overlap between two buildings
+                candidates = (candidates | nodes_ab) & ~(self.network.AB["total"])
                 idx = candidates.double().multinomial(
                     1
                 )  # randomly pick one from each row
@@ -183,7 +187,7 @@ class DySTUrbD_Epi(object):
 
         return res
 
-    def _simulate(self, routine, prob_AA):
+    def _simulate(self):
         """
         Simulate policy response.
 
@@ -198,11 +202,14 @@ class DySTUrbD_Epi(object):
         8. Dead
         """
         num_inf = self.agents.get_infected.count_nonzero()
-        day = 0
+        day = 1
         while num_inf > 0:
-            self.agents.update_routine(self.buildings.status, self.network.AB["house"])
+            routine = self.agents.update_routine(
+                self.buildings.status, self.network.AB["house"]
+            )
             self.agents.update_period(day)
-            self.agents.update_admission(day)
-            # TODO calculate in-hospital mortalities based on github version
+            num_admission = self.agents.update_admission(day)
+            num_death = self.agents.update_death()
+            num_inf, num_qua_inf = self.agents.update_infection(day, routine)
 
             break

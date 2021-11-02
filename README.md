@@ -25,16 +25,14 @@ The class attributes are listed for debugging convenience.
         4. income
 
     risk                : Risks of exposure, contagion, admission, mortality.
-        1. exposure
-        2. contagion
-        3. admission
-        4. mortality
+        1. infection
+        2. admission
+        3. mortality
 
     start               : Relative start dates
-        1. contagiuos
-        2. sick
-        3. quarantine
-        4. admission
+        1. sick
+        2. quarantine
+        3. admission
 
     period              : Relative  period
         1. sick
