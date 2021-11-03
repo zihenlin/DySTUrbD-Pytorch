@@ -27,6 +27,8 @@ class Agents(object):
     risk                : Risks of exposure, infection, admission, mortality.
     timestamp           : Relative start dates and period
     status              : Contagious status
+    routine             : The originally initiated routine
+    daily_infection     : Daily infection matrix for downstream analysis
     """
 
     def __init__(self, args, b, device):
@@ -46,6 +48,7 @@ class Agents(object):
         self.start = self._init_start_date(self)
         self.period = self._init_period(self)
         self.status = self._init_status()
+        self.daily_infection = []
 
     def _init_identity(self, path):
         """
@@ -674,6 +677,12 @@ class Agents(object):
 
         return res
 
+    def _append_daily_infection(self, mat):
+        """
+        Append daily infection matrix to daily_infection
+        """
+        self.daily_infection.append(mat)
+
     def update_infection(self, day, routine):
         """
         Update infection probability of agents and agent status if infected.
@@ -686,14 +695,17 @@ class Agents(object):
         -------
         res1 : number of newly infected (not quarantined) agent
         res2 : number of newly infected and quarantined agent
+
+        #TODO: Shall we add a workplace or similar thematic network to detect any potential cluster?
         """
         a_inf = self.get_infected()
         b_inf = (
-            routine[a_inf].sum(1).bool()
+            routine[a_inf].sum(0).bool()
         )  # get a list of buildings visited by infected agents
         a_exposed = (routine.add(b_inf) == 2).sum(
             1
         ) & ~a_inf  # uninfected agents visited same buildings
+        a_qua = self.get_quarantined()
 
         alpha = (4.5 / 3.5) ** 2
         beta = 4.5 / (3.5 ** 2)  # 1 / scale
@@ -702,13 +714,17 @@ class Agents(object):
         contagious_strength = distribution.log.prob(self.agents.period["sick"]).exp()
 
         tmp_risk = self.interaction * contagious_strength
-        # TODO filter each row using infected agent
+        tmp_risk *= a_inf  # only interaction with infected agent
         tmp_risk *= self.risk["infection"].view(-1, 1)
         tmp_risk *= a_exposed.view(-1, 1)  # only exposed agents
         tmp_risk *= 0.08  # normalize factor
-        rand_risk = torch.zeros_like(tmp_risk).uniform_(0, 1)
-        infection = tmp_risk > rand_risk
-        a_qua = self.get_quarantined()
+        # tmp risk is now a sparse matrix with only the interaction of
+        # exposed agent against the infected agent
+        rand_threshold = torch.zeros_like(tmp_risk).uniform_(0, 1)
+        infection = tmp_risk > rand_threshold
+        self._append_daily_infection(
+            infection.nonzero(as_tuple=True).detach().cpu()
+        )  # infection chain
 
         inf_qua = infection & a_qua
         inf_no_qua = infection & ~a_qua
@@ -718,7 +734,6 @@ class Agents(object):
         self.update_status(inf_qua, 5)
         self.update_start(inf_qua, "sick", day)
 
-        # TODO understand how to implement infection chain
         res1 = inf_qua.count_nonzero()
         res2 = inf_no_qua.count_nonzero()
         return res, res2

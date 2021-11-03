@@ -206,7 +206,7 @@ class DySTUrbD_Epi(object):
         while num_inf > 0:
             routine = self.agents.update_routine(
                 self.buildings.status, self.network.AB["house"]
-            )
+            )  # A copy of updated routine
             self.agents.update_period(day)
             num_admission = self.agents.update_admission(day)
             num_death = self.agents.update_death()
