@@ -204,12 +204,43 @@ class DySTUrbD_Epi(object):
         num_inf = self.agents.get_infected.count_nonzero()
         day = 1
         while num_inf > 0:
+            t1 = time()
+
             routine = self.agents.update_routine(
                 self.buildings.status, self.network.AB["house"]
             )  # A copy of updated routine
+            t2 = time()
+            print("Update routine:", t2 - t1)
+
             self.agents.update_period(day)
+            t3 = time()
+            print("Update period:", t3 - t2)
+
             num_admission = self.agents.update_admission(day)
+            t4 = time()
+            print("Update admission:", t4 - t3)
+
             num_death = self.agents.update_death()
+            t5 = time()
+            print("Update death:", t5 - t4)
+
             num_inf, num_qua_inf = self.agents.update_infection(day, routine)
+            t6 = time()
+            print("Update infection:", t6 - t5)
+
+            self.agents.end_quarantine()
+            t7 = time()
+            print("End quarantine", t7 - t6)
+
+            self.agents.update_diagnosis(day)
+            t8 = time()
+            print("Update diagnosis:", t8 - t7)
+
+            self.agents.update_recovery()
+            t9 = time()
+            print("Update recovery:", t9 - t8)
+
+            num_inf = self.agents.get_infected.count_nonzero()
+            day += 1
 
             break

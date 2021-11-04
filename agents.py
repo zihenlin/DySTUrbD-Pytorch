@@ -611,6 +611,12 @@ class Agents(object):
         self.period["quarantine"][a_qua] = day - self.start["quarantine"]
         self.period["admission"][a_hos] = day - self.start["admission"]
 
+    def reset_period(self, mask, key):
+        """
+        Reset period of agents.
+        """
+        self.period[key][mask] = 0
+
     def update_admission(self, day):
         """
         Update admission probability of agents and agent status if admitted.
@@ -622,15 +628,21 @@ class Agents(object):
         Return
         -------
         res : int
+
+        #TODO: does quarantine period reset after admission
         """
         a_no_admit = self.get_no_admit()
         a_uninf = (self.status == 1) | (self.status == 3)
         tmp_risk = self.risk["admission"]
         tmp_risk *= ~(a_uninf | a_no_admit).int()  # remove admission risk
-        rand_risk = torch.zeros_like(tmp_risk).uniform_(0, 1)
-        admission = tmp_risk > rand_risk
+        rand_threshold = torch.zeros_like(tmp_risk).uniform_(0, 1)
+        admission = tmp_risk > rand_threshold
+
         self.update_status(admission, 6)
         self.update_start(admission, "admission", day)
+        self.reset_period(admission, "quarantine")
+        self.update_start(admission, "quarantine", 0)
+
         res = admission.count_nonzero()
 
         return res
@@ -680,8 +692,51 @@ class Agents(object):
     def _append_daily_infection(self, mat):
         """
         Append daily infection matrix to daily_infection
+
+        Parameter
+        ---------
+        mat : tuple (exposed tensor, infected tensor)
+
         """
         self.daily_infection.append(mat)
+
+    def get_exposed_risk(self, routine):
+        """
+        Compute the risk of exposed agents using interaction probabiltiy
+        and official risk distribution.
+        Return a sparse matrix with exposed agents and their interaction
+        with infected agents.
+
+        Parameter
+        ---------
+        routine : Updated routine of the day
+
+        Return
+        ---------
+        res : torch.Tensor (A,A)
+
+        """
+        a_inf = self.get_infected()
+        b_inf = (
+            routine[a_inf].sum(0).bool()
+        )  # get a list of buildings visited by infected agents
+        a_exposed = (routine.add(b_inf) == 2).sum(
+            1
+        ) & ~a_inf  # uninfected agents visited same buildings
+
+        alpha = (4.5 / 3.5) ** 2
+        beta = 4.5 / (3.5 ** 2)  # 1 / scale
+        distribution = torch.distributions.gamma.Gamma(alpha, beta)
+        distribution.support = torch.distributions.constraints.greater_than_eq(0)
+        contagious_strength = distribution.log.prob(self.agents.period["sick"]).exp()
+
+        res = self.interaction * contagious_strength
+        res *= a_inf  # only interaction with infected agent
+        res *= self.risk["infection"].view(-1, 1)
+        res *= a_exposed.view(-1, 1)  # only exposed agents
+        res *= 0.08  # normalize factor
+
+        return res
 
     def update_infection(self, day, routine):
         """
@@ -698,30 +753,12 @@ class Agents(object):
 
         #TODO: Shall we add a workplace or similar thematic network to detect any potential cluster?
         """
-        a_inf = self.get_infected()
-        b_inf = (
-            routine[a_inf].sum(0).bool()
-        )  # get a list of buildings visited by infected agents
-        a_exposed = (routine.add(b_inf) == 2).sum(
-            1
-        ) & ~a_inf  # uninfected agents visited same buildings
         a_qua = self.get_quarantined()
+        sparse_risk = self.get_exposed_risk(self, routine)
 
-        alpha = (4.5 / 3.5) ** 2
-        beta = 4.5 / (3.5 ** 2)  # 1 / scale
-        distribution = torch.distributions.gamma.Gamma(alpha, beta)
-        distribution.support = torch.distributions.constraints.greater_than_eq(0)
-        contagious_strength = distribution.log.prob(self.agents.period["sick"]).exp()
+        rand_threshold = torch.zeros_like(sparse_risk).uniform_(0, 1)
+        infection = sparse_risk > rand_threshold
 
-        tmp_risk = self.interaction * contagious_strength
-        tmp_risk *= a_inf  # only interaction with infected agent
-        tmp_risk *= self.risk["infection"].view(-1, 1)
-        tmp_risk *= a_exposed.view(-1, 1)  # only exposed agents
-        tmp_risk *= 0.08  # normalize factor
-        # tmp risk is now a sparse matrix with only the interaction of
-        # exposed agent against the infected agent
-        rand_threshold = torch.zeros_like(tmp_risk).uniform_(0, 1)
-        infection = tmp_risk > rand_threshold
         self._append_daily_infection(
             infection.nonzero(as_tuple=True).detach().cpu()
         )  # infection chain
@@ -731,9 +768,55 @@ class Agents(object):
 
         self.update_status(inf_no_qua, 2)
         self.update_start(inf_no_qua, "sick", day)
-        self.update_status(inf_qua, 5)
+        self.update_status(inf_qua, 4)
         self.update_start(inf_qua, "sick", day)
 
         res1 = inf_qua.count_nonzero()
         res2 = inf_no_qua.count_nonzero()
+
         return res, res2
+
+    def end_quarantine(self):
+        """
+        Restore the status of agents who have sufficient days of quarantine.
+        """
+        threshold = 7  # hyperparam
+        a_end_qua = self.period["quarantine"] == threshold
+        a_healthy = self.status == 3
+        a_undiagnosed = self.status == 4
+        a_end_qua &= a_healthy | a_undiagnosed
+
+        self.update_status(a_end_qua & a_healthy, 1)  # healthy agents
+        self.update_status(a_end_qua & a_undiagnosed, 2)  # undiagnosed infected agents
+        self.reset_period(a_end_qua, "quarantine")
+        self.update_start(a_end_qua, "quarantine", 0)  # reset
+
+    def update_diagnosis(self, day):
+        """
+        Turn the status of agents with sufficient days of infection into diagnosed.
+        Send these free agents to quarantine.
+        """
+        threshold = 7  # hyperparam
+        a_diagnosed = self.period["sick"] == threshold
+        a_free = self.status == 2
+        a_qua = self.status == 4
+        a_diagnosed &= a_free | a_qua
+
+        self.update_start(a_diagnosed & a_free, "quarantine", day)
+        self.update_status(a_diagnosed, 5)
+
+    def update_recovery(self):
+        """
+        Recover the sick agents in quarantine or hospital.
+        #TODO: A list of threshold to increase variance of latent period and recovery period?
+        """
+        threshold = [21, 28]
+
+        a_qua = (self.status == 5) & (self.period["sick"] == threshold[0])
+        a_hos = (self.status == 6) & (self.period["sick"] == threshold[1])
+
+        self.update_status(a_qua | a_hos, 7)
+        self.reset_period(a_qua, "quarantine")
+        self.update_start(a_qua, "quarantine", 0)
+        self.reset_period(a_hos, "admission")
+        self.update_start(a_hos, "admission", 0)
