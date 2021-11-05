@@ -236,9 +236,13 @@ class DySTUrbD_Epi(object):
             t8 = time()
             print("Update diagnosis:", t8 - t7)
 
-            self.agents.update_recovery()
+            self.agents.update_diagnosed_family(day, self.network.AH)
             t9 = time()
-            print("Update recovery:", t9 - t8)
+            print("Update diagnosed family:", t9 - t8)
+
+            self.agents.update_recovery()
+            t10 = time()
+            print("Update recovery:", t10 - t9)
 
             num_inf = self.agents.get_infected.count_nonzero()
             day += 1

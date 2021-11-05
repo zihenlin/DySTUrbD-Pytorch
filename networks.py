@@ -18,10 +18,12 @@ class Networks(object):
         1. AA - agent - agent
         2. BB - building - building
         3. AB - agent - building
+        4. AH - agent - household
         """
         self.BB = self.__building_building(buildings)
         self.AA = self.__agent_agent(agents, buildings, device)
         self.AB = self.__agent_building(agents, buildings, device)
+        self.AH = self.__agent_household(agents)
 
     def __building_building(self, buildings):
         """
@@ -190,5 +192,34 @@ class Networks(object):
 
         # res["total"] = -torch.log(res["total"])
         # res["total"] = torch.nan_to_num(res["total"], posinf=100)
+
+        return res
+
+    def __agent_household(self, agents):
+        """
+        Create network of agents and households.
+
+        Nodes
+        ------
+        Agents, Households
+
+        Edges
+        ------
+        1 betweeen agents and their household
+
+        Shape
+        ------
+        (Agent, Household)
+
+        Return
+        ------
+        res : torch.Tensor
+        """
+        num_a = agents.identity["id"].shape[0]
+        num_h = agents.identity["house"].unique().shape[0]
+
+        res = torch.nn.functional.one_hot(
+            agents.identity["house"].long(), num_classes=num_h
+        ).bool()
 
         return res

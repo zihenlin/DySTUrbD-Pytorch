@@ -71,6 +71,12 @@ class Agents(object):
 
         for idx in range(len(keys)):
             res[keys[idx]] = data[:, idx]
+
+        h_unique = res["house"].unique()
+        for idx in range(h_unique.shape[0]):
+            mask = res["house"] == h_unique[idx]
+            res["house"][mask] = idx
+
         res["age"] = self._group_to_age(res["group"])
         res["religious"] = self._assign_religious(res["house"])
 
@@ -709,7 +715,7 @@ class Agents(object):
 
         Parameter
         ---------
-        routine : Updated routine of the day
+        routine : torch.Tensor
 
         Return
         ---------
@@ -745,6 +751,7 @@ class Agents(object):
         Parameter
         ---------
         day : int
+        rountine : torch.Tensor
 
         Return
         -------
@@ -795,6 +802,10 @@ class Agents(object):
         """
         Turn the status of agents with sufficient days of infection into diagnosed.
         Send these free agents to quarantine.
+
+        Parameter
+        ---------
+        day : int
         """
         threshold = 7  # hyperparam
         a_diagnosed = self.period["sick"] == threshold
@@ -804,6 +815,43 @@ class Agents(object):
 
         self.update_start(a_diagnosed & a_free, "quarantine", day)
         self.update_status(a_diagnosed, 5)
+
+    def update_diagnosed_family(self, day, network_house):
+        """
+        Detect newly diagnosed agents and send their family to quarantine
+
+        Idea:
+        network_house (A, B) is many-to-one, i.e., each row contains only one value.
+        Using argmax, we obtained the household index of the newly diagnosed agents.
+        network_house tranpose (B,A) presents one-to-many, one building corresponds to multiple agents.
+        Using tensor.nonzero(as_tuple=True), we obtain a list of agents which share the same households
+        with newly diagnosed agents.
+
+        tensor.nonzero(as_tuple=True) returns (torch.Tensor(row indices), torch.Tensor(column indices)).
+        In our context, torch.Tensor(column indices) represents agents in the infected household.
+
+        Parameter
+        ---------
+        day : int
+        network_house : torch.Tensor
+        """
+        threshold = 7
+
+        a_new_diag = (self.status == 5) & (self.period["sick"] == threshold)
+        idx_h = network_house[a_new_diag].argmax(dim=1)
+        h_to_a = network_house.t()
+
+        idx_family = h_to_a[idx_h].nonzero(as_tuple=True)[1]
+        a_family = torch.zeros_like(self.status).long()
+        a_family[idx_h] = 1
+        a_family &= ~a_new_diag
+
+        a_healthy = a_family & (self.status == 1)
+        a_infected = a_family & (self.status == 2)
+
+        self.update_start(a_family, "quarantine", day)
+        self.update_status(a_healthy, 3)
+        self.update_status(a_infected, 4)
 
     def update_recovery(self):
         """
