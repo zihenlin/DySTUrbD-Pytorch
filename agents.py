@@ -149,9 +149,11 @@ class Agents(object):
         res["house"] = torch.round(
             util.load_csv(path, self.device, cols=[1], nrows=1000).view(-1)
         )
+        self.identity["area"] = torch.zeros_like(res["house"])
         for idx in range(b.identity["idx"].shape[0]):
             mask = res["house"] == b.identity["id"][idx]
             res["house"][mask] = idx
+            self.identity["area"][mask] = b.identity["area"][idx]
 
         return res
 
@@ -706,7 +708,7 @@ class Agents(object):
         """
         self.daily_infection.append(mat)
 
-    def get_exposed_risk(self, routine):
+    def get_exposed_risk(self, routine, gamma):
         """
         Compute the risk of exposed agents using interaction probabiltiy
         and official risk distribution.
@@ -730,11 +732,7 @@ class Agents(object):
             1
         ) & ~a_inf  # uninfected agents visited same buildings
 
-        alpha = (4.5 / 3.5) ** 2
-        beta = 4.5 / (3.5 ** 2)  # 1 / scale
-        distribution = torch.distributions.gamma.Gamma(alpha, beta)
-        distribution.support = torch.distributions.constraints.greater_than_eq(0)
-        contagious_strength = distribution.log.prob(self.agents.period["sick"]).exp()
+        contagious_strength = gamma.log.prob(self.period["sick"]).exp()
 
         res = self.interaction * contagious_strength
         res *= a_inf  # only interaction with infected agent
@@ -744,7 +742,7 @@ class Agents(object):
 
         return res
 
-    def update_infection(self, day, routine):
+    def update_infection(self, day, routine, gamma):
         """
         Update infection probability of agents and agent status if infected.
 
@@ -761,7 +759,7 @@ class Agents(object):
         #TODO: Shall we add a workplace or similar thematic network to detect any potential cluster?
         """
         a_qua = self.get_quarantined()
-        sparse_risk = self.get_exposed_risk(self, routine)
+        sparse_risk = self.get_exposed_risk(self, routine, gamma)
 
         rand_threshold = torch.zeros_like(sparse_risk).uniform_(0, 1)
         infection = sparse_risk > rand_threshold
@@ -775,11 +773,11 @@ class Agents(object):
 
         self.update_status(inf_no_qua, 2)
         self.update_start(inf_no_qua, "sick", day)
-        self.update_status(inf_qua, 4)
+        self.update_status(inf_qua, 5)
         self.update_start(inf_qua, "sick", day)
 
-        res1 = inf_qua.count_nonzero()
-        res2 = inf_no_qua.count_nonzero()
+        res1 = infection.count_nonzero()
+        res2 = inf_qua.count_nonzero()
 
         return res, res2
 
@@ -806,15 +804,24 @@ class Agents(object):
         Parameter
         ---------
         day : int
+
+        Return
+        ---------
+        res : int
         """
         threshold = 7  # hyperparam
         a_diagnosed = self.period["sick"] == threshold
         a_free = self.status == 2
         a_qua = self.status == 4
+        new_qua = a_diagnosed & a_free
         a_diagnosed &= a_free | a_qua
 
-        self.update_start(a_diagnosed & a_free, "quarantine", day)
+        self.update_start(new_qua, "quarantine", day)
         self.update_status(a_diagnosed, 5)
+
+        res = new_qua.count_nonzero()
+
+        return res
 
     def update_diagnosed_family(self, day, network_house):
         """
@@ -834,10 +841,15 @@ class Agents(object):
         ---------
         day : int
         network_house : torch.Tensor
+
+        Return
+        ---------
+        res : int
         """
         threshold = 7
 
         a_new_diag = (self.status == 5) & (self.period["sick"] == threshold)
+        a_qua = self.get_quarantined()  # get family family already in quarantine
         idx_h = network_house[a_new_diag].argmax(dim=1)
         h_to_a = network_house.t()
 
@@ -845,6 +857,7 @@ class Agents(object):
         a_family = torch.zeros_like(self.status).long()
         a_family[idx_h] = 1
         a_family &= ~a_new_diag
+        a_family &= ~a_qua
 
         a_healthy = a_family & (self.status == 1)
         a_infected = a_family & (self.status == 2)
@@ -852,6 +865,10 @@ class Agents(object):
         self.update_start(a_family, "quarantine", day)
         self.update_status(a_healthy, 3)
         self.update_status(a_infected, 4)
+
+        res = a_family.count_nonzero()
+
+        return res
 
     def update_recovery(self):
         """

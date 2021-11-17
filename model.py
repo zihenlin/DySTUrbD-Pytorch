@@ -64,6 +64,10 @@ class DySTUrbD_Epi(object):
         t7 = time()
         print("Routine:", t7 - t6)
 
+        self.gamma = self._get_gamma()
+        t8 = time()
+        print("Gamma:", t8 - t7)
+
         print()
         print("Init Complete!")
 
@@ -72,6 +76,17 @@ class DySTUrbD_Epi(object):
         Run the model, Gogogo!
         """
         self._simulate()
+
+    def _get_gamma(self):
+        """
+        Get gamma distribution with specific parameters.
+        """
+        alpha = (4.5 / 3.5) ** 2
+        beta = 4.5 / (3.5 ** 2)  # 1 / scale
+        res = torch.distributions.gamma.Gamma(alpha, beta)
+        res.support = torch.distributions.constraints.greater_than_eq(0)
+
+        return res
 
     def _get_dist(self):
         """
@@ -187,6 +202,53 @@ class DySTUrbD_Epi(object):
 
         return res
 
+    def _compute_R(self, mask, today):
+        """
+        Compute R value using number of new cases and expected infectious risk.
+
+        Parameter
+        ---------
+        day : int
+        mask : torch.Tensor
+
+        Return
+        ---------
+        res : int
+        """
+        sum_I = 0
+        recover = 21  # hyperparameter
+        new_inf = mask & (self.agents.period["sick"] == today)
+        new_inf = new_inf.count_nonzero()
+
+        for day in range(1, recover):
+            cnt = mask & (self.agents.period["sick"] == day)
+            cnt = cnt.count_nonzero()
+            contagious_strength = self.gamma.log.prob(day).exp()
+            sum_I += cnt * contagious_strength
+
+        res = new_inf / sum_I if sum_I > 0 else 0
+
+        return res
+
+    def _get_SA_R(self, day):
+        """
+        Compute R value for each statistical region.
+
+        Parameter
+        ---------
+        day : int
+
+        Return
+        --------
+        res : dict
+        """
+        sas = self.buildings.identity["area"].unique()
+        res = {}
+
+        for sa in sas:
+            sa_a = self.agents.identity["area"] == sa
+            res[sa] = self._compute_R(sa_a, day)
+
     def _simulate(self):
         """
         Simulate policy response.
@@ -216,15 +278,15 @@ class DySTUrbD_Epi(object):
             t3 = time()
             print("Update period:", t3 - t2)
 
-            num_admission = self.agents.update_admission(day)
+            new_admission = self.agents.update_admission(day)
             t4 = time()
             print("Update admission:", t4 - t3)
 
-            num_death = self.agents.update_death()
+            new_death = self.agents.update_death()
             t5 = time()
             print("Update death:", t5 - t4)
 
-            num_inf, num_qua_inf = self.agents.update_infection(day, routine)
+            new_inf, new_qua = self.agents.update_infection(day, routine, self.gamma)
             t6 = time()
             print("Update infection:", t6 - t5)
 
@@ -232,11 +294,11 @@ class DySTUrbD_Epi(object):
             t7 = time()
             print("End quarantine", t7 - t6)
 
-            self.agents.update_diagnosis(day)
+            new_qua += self.agents.update_diagnosis(day)
             t8 = time()
             print("Update diagnosis:", t8 - t7)
 
-            self.agents.update_diagnosed_family(day, self.network.AH)
+            new_qua += self.agents.update_diagnosed_family(day, self.network.AH)
             t9 = time()
             print("Update diagnosed family:", t9 - t8)
 
@@ -245,6 +307,12 @@ class DySTUrbD_Epi(object):
             print("Update recovery:", t10 - t9)
 
             num_inf = self.agents.get_infected.count_nonzero()
+            num_qua = self.agents.get_quarantined().count_nonzero()
+            num_death = self.agents.get_dead().count_nonzero()
+            num_admission = self.agents.get_hospitalized().count_nonzero()
+            R_total = self._compute_R(torch.ones_like(self.agents.status), day)
+            R_sa = self._get_SA_R(day)
+
             day += 1
 
             break
