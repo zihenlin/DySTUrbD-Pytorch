@@ -97,3 +97,9 @@ class Buildings(object):
 
         res["etcR"] = torch.cat((res["etc"], res["religious"]))
         return res
+
+    def get_closed(self):
+        """
+        Return mask of closed buildings.
+        """
+        return self.status == 0

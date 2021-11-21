@@ -20,7 +20,7 @@ import dijkstra_mp64  # multiprocess shortest path
 class DySTUrbD_Epi(object):
     """Simulate the world."""
 
-    def __init__(self, args):
+    def __init__(self, args, count):
         """
         Initialize the world.
 
@@ -28,6 +28,11 @@ class DySTUrbD_Epi(object):
         ---------
         args : arguments
         """
+        self.res = {
+            "Sim": count,
+            "Time": {},
+            "Results": {"Stats": {}, "Buildings": {}, "SAs": {}, "IO_mat": {}},
+        }
         self.time = time()
         print("Init start!")
 
@@ -40,33 +45,33 @@ class DySTUrbD_Epi(object):
 
         self.buildings = buildings.Buildings(args.buildings_dir, self.device)
         t2 = time()
-        print("Buildings:", t2 - t1)
+        self._log_time("Buildings", t2 - t1)
 
         self.agents = agents.Agents(args, self.buildings, self.device)
         t3 = time()
-        print("Agentss:", t3 - t2)
+        self._log_time("Agents", t3 - t2)
 
         self.network = networks.Networks(self.agents, self.buildings, self.device)
         t4 = time()
-        print("Networks:", t4 - t3)
+        self._log_time("Networks", t4 - t3)
 
         dist = self._get_dist()
         t5 = time()
-        print("Shortest Path", t5 - t4)
+        self._log_time("ShortestPath", t5 - t4)
 
         prob_AA = self._prob_AA(dist)
         self.agents.set_interaction(prob_AA)
         t6 = time()
-        print("Interaction Prob:", t6 - t5)
+        self._log_time("Interaction", t6 - t5)
 
         routine = self._get_routine(dist)
         self.agents.set_routine(routine)
         t7 = time()
-        print("Routine:", t7 - t6)
+        self._log_time("Routine", t7 - t6)
 
         self.gamma = self._get_gamma()
         t8 = time()
-        print("Gamma:", t8 - t7)
+        self._log_time("Gamma", t8 - t7)
 
         print()
         print("Init Complete!")
@@ -76,6 +81,20 @@ class DySTUrbD_Epi(object):
         Run the model, Gogogo!
         """
         self._simulate()
+
+    def _log_time(self, key, time):
+        """
+        Save the computational time to model.res
+        """
+        self.res["Time"][key] = time
+        print(f"{key}: {time}")
+
+    def _log_stats(self, day, key, data):
+        """
+        Save and print the essential data generated from simulation.
+        """
+        self.res["Results"]["Stats"][day][key] = data
+        print(f"{key}: {data}")
 
     def _get_gamma(self):
         """
@@ -241,6 +260,7 @@ class DySTUrbD_Epi(object):
         Return
         --------
         res : dict
+        res
         """
         sas = self.buildings.identity["area"].unique()
         res = {}
@@ -248,6 +268,32 @@ class DySTUrbD_Epi(object):
         for sa in sas:
             sa_a = self.agents.identity["area"] == sa
             res[sa] = self._compute_R(sa_a, day)
+
+        return res
+
+    def _get_building_inf(self):
+        """
+        Compute the infection ratio in each building
+
+        Idea:
+        1. Calculate total number of resident in each building
+            using AB network using sum
+        2. Calculate mask infected agents and calculate infected agents
+            in each building using sum
+
+        Return
+        -------
+        inf : torch.Tensor
+        ratio : torch.Tensor
+        """
+        ab_house = self.networks.AB["house"]
+        a_inf = self.agents.get_infected()
+        inf_house = ab_house.mul(a_inf)
+
+        total = ab_house.sum(0)
+        inf = inf_house.sum(0)
+
+        return inf, inf.div(total.view(-1, 1))
 
     def _simulate(self):
         """
@@ -263,55 +309,90 @@ class DySTUrbD_Epi(object):
         7. Recovered
         8. Dead
         """
-        num_inf = self.agents.get_infected.count_nonzero()
+        num_inf = self.agents.get_infected().count_nonzero()
         day = 1
         while num_inf > 0:
-            t1 = time()
 
+            """
+            Computation to obtain data
+            """
+            t1 = time()
             routine = self.agents.update_routine(
                 self.buildings.status, self.network.AB["house"]
             )  # A copy of updated routine
             t2 = time()
-            print("Update routine:", t2 - t1)
+            self._log_time("Update Rountine", t2 - t1)
 
             self.agents.update_period(day)
             t3 = time()
-            print("Update period:", t3 - t2)
+            self._log_time("Update Period", t3 - t2)
 
             new_admission = self.agents.update_admission(day)
             t4 = time()
-            print("Update admission:", t4 - t3)
+            self._log_time("Update Admission", t4 - t3)
 
             new_death = self.agents.update_death()
             t5 = time()
-            print("Update death:", t5 - t4)
+            self._log_time("Update Death", t5 - t4)
 
             new_inf, new_qua = self.agents.update_infection(day, routine, self.gamma)
             t6 = time()
-            print("Update infection:", t6 - t5)
+            self._log_time("Update Infection", t6 - t5)
 
             self.agents.end_quarantine()
             t7 = time()
-            print("End quarantine", t7 - t6)
+            self._log_time("End Quarantine", t7 - t6)
 
             new_qua += self.agents.update_diagnosis(day)
             t8 = time()
-            print("Update diagnosis:", t8 - t7)
+            self._log_time("Update Diagnosis", t8 - t7)
 
             new_qua += self.agents.update_diagnosed_family(day, self.network.AH)
             t9 = time()
-            print("Update diagnosed family:", t9 - t8)
+            self._log_time("Update Diagnosed Family", t9 - t8)
 
-            self.agents.update_recovery()
+            new_recovered = self.agents.update_recovery()
             t10 = time()
-            print("Update recovery:", t10 - t9)
+            self._log_time("Update Recovery", t10 - t9)
 
             num_inf = self.agents.get_infected.count_nonzero()
             num_qua = self.agents.get_quarantined().count_nonzero()
             num_death = self.agents.get_dead().count_nonzero()
             num_admission = self.agents.get_hospitalized().count_nonzero()
+            num_recovered = self.agents.get_recovered().count_nonzero()
             R_total = self._compute_R(torch.ones_like(self.agents.status), day)
             R_sa = self._get_SA_R(day)
+            num_closed = self.buildings.get_closed().count_nonzero()
+            total_inf = (
+                num_inf
+                if day == 0
+                else self.res["Results"]["Stats"][day - 1]["Total Infections"] + new_inf
+            )
+            num_susceptible = self.agents.identity["id"].shape[0] - total_inf
+            b_inf, b_ratio = self._get_building_inf()
+
+            """
+            Logging data to output
+            """
+            res = {}
+            self.res["Results"]["SAs"][day] = R_sa
+            self.res["Results"]["Buildings"][day]["inf"] = b_inf.tolist()
+            self.res["Results"]["Buildings"][day]["ratio"] = b_ratio.tolist()
+            self.res["Results"]["Stats"][day] = {}
+            self._log_stats(day, "Total Infections", total_inf)
+            self._log_stats(day, "Active Infections", num_inf)
+            self._log_stats(day, "Daily Infections", new_inf)
+            self._log_stats(day, "Total Recovered", num_recovered)
+            self._log_stats(day, "Daily Recovered", new_recovered)
+            self._log_stats(day, "Total Quarantined", num_qua)
+            self._log_stats(day, "Daily Quarantined", new_qua)
+            self._log_stats(day, "Total Hospitalized", num_admission)
+            self._log_stats(day, "Daily Hospitalized", new_admission)
+            self._log_stats(day, "Total Deaths", num_death)
+            self._log_stats(day, "Daily Deaths", new_death)
+            self._log_stats(day, "R_total", R_total)
+            self._log_stats(day, "Closed Buildings", num_closed)
+            self._log_stats(day, "Susceptible Agents:", num_susceptible)
 
             day += 1
 

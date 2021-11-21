@@ -519,10 +519,6 @@ class Agents(object):
     def get_infected(self):
         """
         Return mask of infected agents.
-
-        Return
-        -------
-        res : torch.Tensor
         """
         return (
             (self.status == 2)
@@ -534,30 +530,24 @@ class Agents(object):
     def get_quarantined(self):
         """
         Return mask of quarantinead agents.
-
-        Return
-        -------
-        res : torch.Tensor
         """
         return (self.status == 3) | (self.status == 4) | (self.status == 5)
 
     def get_hospitalized(self):
         """
         Return mask of hospitalized agents.
-
-        Return
-        -------
-        res : torch.Tensor
         """
         return self.status == 6
+
+    def get_recovered(self):
+        """
+        Return mask of recovered agents.
+        """
+        return self.status == 7
 
     def get_dead(self):
         """
         Return mask of dead agents.
-
-        Return
-        -------
-        res : torch.Tensor
         """
         return self.status == 8
 
@@ -570,10 +560,6 @@ class Agents(object):
         6. Hospitalized
         7. Recovered
         8. Dead
-
-        Return
-        -------
-        res : torch.Tensor
         """
         return (
             (self.period["sick"] < 4) | (self.period["sick"] > 14) | (self.status >= 6)
@@ -582,10 +568,6 @@ class Agents(object):
     def get_no_death(self):
         """
         Return mask of agents who unlikely to die.
-
-        Return
-        -------
-        res : torch.Tensor
         """
         return self.period["admission"] < 3
 
@@ -874,6 +856,10 @@ class Agents(object):
         """
         Recover the sick agents in quarantine or hospital.
         #TODO: A list of threshold to increase variance of latent period and recovery period?
+
+        Return
+        -------
+        res : int
         """
         threshold = [21, 28]
 
@@ -885,3 +871,7 @@ class Agents(object):
         self.update_start(a_qua, "quarantine", 0)
         self.reset_period(a_hos, "admission")
         self.update_start(a_hos, "admission", 0)
+
+        res = (a_qua | a_hos).count_nonzero()
+
+        return res
