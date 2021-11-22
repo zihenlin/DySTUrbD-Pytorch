@@ -180,6 +180,7 @@ class DySTUrbD_Epi(object):
         """
         num_aa = self.network.AA.shape[0]  # total number of agents
         num_bb = self.network.BB.shape[0]  # total number of buildings
+        idx_0 = torch.arange(num_aa)
         dist_ab = 1  # Given distance threshold for AB network
         dist_bb = 6  # Given distance threshold for BB network
 
@@ -213,10 +214,11 @@ class DySTUrbD_Epi(object):
 
                 candidates = near_start & near_end  # overlap between two buildings
                 candidates = (candidates | nodes_ab) & ~(self.network.AB["total"])
-                idx = candidates.double().multinomial(
+                idx_1 = candidates.double().multinomial(
                     1
                 )  # randomly pick one from each row
-                choice = template.scatter(1, idx.view(-1, 1), candidates)
+                template[idx_0, idx_1] = 1
+                choice = template & candidates
                 res |= choice  # add new building to routine (some are zeros)
 
         return res
