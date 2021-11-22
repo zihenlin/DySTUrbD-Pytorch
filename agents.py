@@ -679,17 +679,6 @@ class Agents(object):
 
         return res
 
-    def _append_daily_infection(self, mat):
-        """
-        Append daily infection matrix to daily_infection
-
-        Parameter
-        ---------
-        mat : tuple (exposed tensor, infected tensor)
-
-        """
-        self.daily_infection.append(mat)
-
     def get_exposed_risk(self, routine, gamma):
         """
         Compute the risk of exposed agents using interaction probabiltiy
@@ -737,6 +726,7 @@ class Agents(object):
         -------
         res1 : number of newly infected (not quarantined) agent
         res2 : number of newly infected and quarantined agent
+        infection : daily infection matrix
 
         #TODO: Shall we add a workplace or similar thematic network to detect any potential cluster?
         """
@@ -745,10 +735,6 @@ class Agents(object):
 
         rand_threshold = torch.zeros_like(sparse_risk).uniform_(0, 1)
         infection = sparse_risk > rand_threshold
-
-        self._append_daily_infection(
-            infection.nonzero(as_tuple=True).detach().cpu()
-        )  # infection chain
 
         inf_qua = infection & a_qua
         inf_no_qua = infection & ~a_qua
@@ -761,7 +747,7 @@ class Agents(object):
         res1 = infection.count_nonzero()
         res2 = inf_qua.count_nonzero()
 
-        return res, res2
+        return res, res2, infection
 
     def end_quarantine(self):
         """

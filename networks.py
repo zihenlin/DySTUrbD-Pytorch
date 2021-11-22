@@ -24,6 +24,7 @@ class Networks(object):
         self.AA = self.__agent_agent(agents, buildings, device)
         self.AB = self.__agent_building(agents, buildings, device)
         self.AH = self.__agent_household(agents)
+        self.ASA = self.__agent_SA(agents)
 
     def __building_building(self, buildings):
         """
@@ -220,6 +221,35 @@ class Networks(object):
 
         res = torch.nn.functional.one_hot(
             agents.identity["house"].long(), num_classes=num_h
+        ).bool()
+
+        return res
+
+    def __agent_SA(self, agents):
+        """
+        Create network of agents and SA.
+
+        Nodes
+        ------
+        Agents, SA
+
+        Edges
+        ------
+        1 betweeen agents and their SA
+
+        Shape
+        ------
+        (Agent, SA)
+
+        Return
+        ------
+        res : torch.Tensor
+        """
+        num_a = agents.identity["id"].shape[0]
+        num_SA = agents.identity["area"].unique().shape[0]
+
+        res = torch.nn.functional.one_hot(
+            agents.identity["area"].long(), num_classes=num_SA
         ).bool()
 
         return res

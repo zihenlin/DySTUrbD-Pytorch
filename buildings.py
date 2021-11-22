@@ -42,15 +42,37 @@ class Buildings(object):
         self.identity = {
             "idx": torch.arange(data.shape[0]),
             "id": data[:, 0],
-            "area": data[:, 3],
+            "area": self._get_SA_idx(data[:, 3]),
             "X": data[:, 6],
             "Y": data[:, 7],
         }
+
         self.usg = {"broad": data[:, 8], "specific": data[:, 9]}
         self.land = {"initial": data[:, 5], "current": data[:, 1]}
         self.floor = {"number": data[:, 2], "volume": data[:, 4]}
         self.status = torch.ones((data.shape[0],), device=self.device, dtype=torch.bool)
         self.activity = self._create_activity()
+
+    def _get_SA_idx(self, data):
+        """
+        Convert SAs, into arange of index
+
+        Parameter
+        ---------
+        data : torch.Tensor (SA,1)
+
+        Return
+        -------
+        res : torch.Tensor (SA,1)
+        """
+        res = torch.zeros_like(data)
+        SAs = data.unique()
+        num_SAs = SA.shape[0]
+        for idx in range(num_SAs):
+            mask = data == SAs[idx]
+            res[mask] = idx
+
+        return res
 
     def _create_activity(self):
         """

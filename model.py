@@ -288,7 +288,7 @@ class DySTUrbD_Epi(object):
         inf : torch.Tensor
         ratio : torch.Tensor
         """
-        ab_house = self.networks.AB["house"]
+        ab_house = self.network.AB["house"]
         a_inf = self.agents.get_infected()
         inf_house = ab_house.mul(a_inf)
 
@@ -296,6 +296,40 @@ class DySTUrbD_Epi(object):
         inf = inf_house.sum(0)
 
         return inf, inf.div(total.view(-1, 1))
+
+    def _get_IO_mat(self, inf_mat):
+        """
+        Obtain in-degree SA infection matrix
+        Based on agents.daily_infection
+
+        Idea:
+        1. Loop through all SAs.
+        2. For each SA, get a mask of corresponding agents.
+        3. Mask inf_mat. (A, A)
+        4. Sum inf_mat row-wise to obtain infecting agents of this SA. (1, A)
+        5. Perform mat-mat multiplication with ASA network (1, A) @ (A, SA) = (1, SA)
+
+        Parameter
+        ----------
+        inf_mat : torch.Tensor (A, A)
+
+        Return
+        -------
+        res : torch.Tensor (SA, SA)
+        """
+        ASA = self.network.ASA  # (A, SA)
+        num_a = ASA.shape[0]
+        num_SA = ASA.shape[1]
+
+        res = torch.zeros((num_SA, num_SA))
+
+        for idx in range(num_SA):
+            mask = ASA[:, idx]  # step 2
+            infecting_a = mask.view(-1, 1) & inf_mat  # step 3
+            infecting_a = infecting_a.sum(0).bool()  # step 4 (1, A)
+            res[idx] = infecting_a @ ASA  # step 5 (1, SA)
+
+        return res  # (SA, SA)
 
     def _simulate(self):
         """
@@ -337,7 +371,9 @@ class DySTUrbD_Epi(object):
             t5 = time()
             self._log_time("Update Death", t5 - t4)
 
-            new_inf, new_qua = self.agents.update_infection(day, routine, self.gamma)
+            new_inf, new_qua, inf_mat = self.agents.update_infection(
+                day, routine, self.gamma
+            )
             t6 = time()
             self._log_time("Update Infection", t6 - t5)
 
@@ -372,6 +408,7 @@ class DySTUrbD_Epi(object):
             )
             num_susceptible = self.agents.identity["id"].shape[0] - total_inf
             b_inf, b_ratio = self._get_building_inf()
+            io_mat = self._get_IO_mat(inf_mat)
 
             """
             Logging data to output
@@ -380,6 +417,7 @@ class DySTUrbD_Epi(object):
             self.res["Results"]["SAs"][day] = R_sa
             self.res["Results"]["Buildings"][day]["inf"] = b_inf.tolist()
             self.res["Results"]["Buildings"][day]["ratio"] = b_ratio.tolist()
+            self.res["Results"]["IO_mat"][day] = io_mat
             self.res["Results"]["Stats"][day] = {}
             self._log_stats(day, "Total Infections", total_inf)
             self._log_stats(day, "Active Infections", num_inf)
