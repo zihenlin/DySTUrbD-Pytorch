@@ -45,10 +45,9 @@ class Agents(object):
         self.identity = self._init_identity(path)
         self.building, self.job = self._init_building_activity(path, b)
         self.risk = self._init_risk(args, self.identity["age"])
-        self.start = self._init_start_date(self)
-        self.period = self._init_period(self)
+        self.start = self._init_start_date()
+        self.period = self._init_period()
         self.status = self._init_status()
-        self.daily_infection = []
 
     def _init_identity(self, path):
         """
@@ -72,7 +71,7 @@ class Agents(object):
         for idx in range(len(keys)):
             res[keys[idx]] = data[:, idx]
 
-        h_unique = res["house"].unique()
+        h_unique = res["house"].unique(sorted=True)
         for idx in range(h_unique.shape[0]):
             mask = res["house"] == h_unique[idx]
             res["house"][mask] = idx
@@ -382,7 +381,7 @@ class Agents(object):
                 mask = torch.randint(2, size=(num_a,), device=self.device)
                 res[agents] &= mask
 
-        return re
+        return res
 
     def _assign_trivial(self, idx, a):
         """

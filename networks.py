@@ -24,7 +24,7 @@ class Networks(object):
         self.AA = self.__agent_agent(agents, buildings, device)
         self.AB = self.__agent_building(agents, buildings, device)
         self.AH = self.__agent_household(agents)
-        self.ASA = self.__agent_SA(agents)
+        self.ASA = self.__agent_SA(agents, buildings)
 
     def __building_building(self, buildings):
         """
@@ -225,7 +225,7 @@ class Networks(object):
 
         return res
 
-    def __agent_SA(self, agents):
+    def __agent_SA(self, agents, buildings):
         """
         Create network of agents and SA.
 
@@ -246,7 +246,7 @@ class Networks(object):
         res : torch.Tensor
         """
         num_a = agents.identity["id"].shape[0]
-        num_SA = agents.identity["area"].unique().shape[0]
+        num_SA = buildings.identity["area"].unique().shape[0]
 
         res = torch.nn.functional.one_hot(
             agents.identity["area"].long(), num_classes=num_SA

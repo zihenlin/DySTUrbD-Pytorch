@@ -20,7 +20,7 @@ import dijkstra_mp64  # multiprocess shortest path
 class DySTUrbD_Epi(object):
     """Simulate the world."""
 
-    def __init__(self, args, count):
+    def __init__(self, args, theme, scenario, count=0):
         """
         Initialize the world.
 
@@ -31,7 +31,13 @@ class DySTUrbD_Epi(object):
         self.res = {
             "Sim": count,
             "Time": {},
-            "Results": {"Stats": {}, "Buildings": {}, "SAs": {}, "IO_mat": {}},
+            "Results": {
+                "Stats": {},
+                "Buildings": {},
+                "SAs": {},
+                "IO_mat": {},
+                "daily_infection": [],
+            },
         }
         self.time = time()
         print("Init start!")
@@ -43,7 +49,9 @@ class DySTUrbD_Epi(object):
         t1 = time()
         print("Number of CPU:", self.cpu)
 
-        self.buildings = buildings.Buildings(args.buildings_dir, self.device)
+        self.buildings = buildings.Buildings(
+            args.buildings_dir, self.device, theme, scenario
+        )
         t2 = time()
         self._log_time("Buildings", t2 - t1)
 
@@ -80,7 +88,7 @@ class DySTUrbD_Epi(object):
         """
         Run the model, Gogogo!
         """
-        self._simulate()
+        # self._simulate()
 
     def _log_time(self, key, time):
         """
@@ -187,7 +195,7 @@ class DySTUrbD_Epi(object):
         nodes_ab = dist[:num_aa, -num_bb:] < dist_ab  # a_nodes (A,B)
         nodes_bb = dist[-num_bb:, -num_bb:] < dist_bb  # all buildings (A,B,B)
         dummy_bb = torch.zeros((1, num_bb), device=self.device)  # empty row
-        nodes_bb = torch.cat((nodes_bb, dummy_row), 0)
+        nodes_bb = torch.cat((nodes_bb, dummy_bb), 0)
 
         res = self.network.AB["total"]
         start = ["house", "anchor", "trivial"]
@@ -217,8 +225,9 @@ class DySTUrbD_Epi(object):
                 idx_1 = candidates.double().multinomial(
                     1
                 )  # randomly pick one from each row
-                template[idx_0, idx_1] = 1
+                template[idx_0, idx_1.view(-1)] = 1
                 choice = template & candidates
+
                 res |= choice  # add new building to routine (some are zeros)
 
         return res
@@ -264,7 +273,7 @@ class DySTUrbD_Epi(object):
         res : dict
         res
         """
-        sas = self.buildings.identity["area"].unique()
+        sas = self.buildings.identity["area"].unique(sorted=True)
         res = {}
 
         for sa in sas:
@@ -393,23 +402,38 @@ class DySTUrbD_Epi(object):
             t10 = time()
             self._log_time("Update Recovery", t10 - t9)
 
+            R_total = self._compute_R(torch.ones_like(self.agents.status), day)
+            t11 = time()
+            self._log_time("Compute overall R", t11 - t10)
+
+            R_sa = self._get_SA_R(day)
+            t12 = time()
+            self._log_time("Compute SA R", t12 - t11)
+
+            b_inf, b_ratio = self._get_building_inf()
+            t13 = time()
+            self._log_time("Compute building infection ratio", t13 - t12)
+
+            io_mat = self._get_IO_mat(inf_mat)
+            t14 = time()
+            self._log_time("Compute IO matrix", t14 - t13)
+
+            self.buildings.update_lockdown()
+            t15 = time()
+            self._log_time("Update lockdown", t15 - t14)
+
             num_inf = self.agents.get_infected.count_nonzero()
             num_qua = self.agents.get_quarantined().count_nonzero()
             num_death = self.agents.get_dead().count_nonzero()
             num_admission = self.agents.get_hospitalized().count_nonzero()
             num_recovered = self.agents.get_recovered().count_nonzero()
-            R_total = self._compute_R(torch.ones_like(self.agents.status), day)
-            R_sa = self._get_SA_R(day)
-            num_closed = self.buildings.get_closed().count_nonzero()
             total_inf = (
                 num_inf
                 if day == 0
                 else self.res["Results"]["Stats"][day - 1]["Total Infections"] + new_inf
             )
             num_susceptible = self.agents.identity["id"].shape[0] - total_inf
-            b_inf, b_ratio = self._get_building_inf()
-            io_mat = self._get_IO_mat(inf_mat)
-
+            num_closed = self.buildings.get_closed().count_nonzero()
             """
             Logging data to output
             """
@@ -418,6 +442,7 @@ class DySTUrbD_Epi(object):
             self.res["Results"]["Buildings"][day]["inf"] = b_inf.tolist()
             self.res["Results"]["Buildings"][day]["ratio"] = b_ratio.tolist()
             self.res["Results"]["IO_mat"][day] = io_mat
+            self.red["Results"]["daily_infection"].append(inf_mat)
             self.res["Results"]["Stats"][day] = {}
             self._log_stats(day, "Total Infections", total_inf)
             self._log_stats(day, "Active Infections", num_inf)
@@ -435,5 +460,3 @@ class DySTUrbD_Epi(object):
             self._log_stats(day, "Susceptible Agents:", num_susceptible)
 
             day += 1
-
-            break

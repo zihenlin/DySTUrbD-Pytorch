@@ -15,7 +15,19 @@ def epi_run(args):
     """
     This function runs epidemiological model.
     """
-    model = DySTUrbD_Epi(args)
+
+    # Hyperparameter
+
+    theme = {
+        "EDU": False,
+        "REL": False,
+        "ALL": True,
+    }
+    scenario = {
+        "DIFF": False,
+        "GRADUAL": False,
+    }
+    model = DySTUrbD_Epi(args, theme, scenario)
     model()
 
 
