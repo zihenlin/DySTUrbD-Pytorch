@@ -28,6 +28,8 @@ class DySTUrbD_Epi(object):
         ---------
         args : arguments
         """
+        self.theme = theme
+        self.scenario = scenario
         self.res = {
             "Sim": count,
             "Time": {},
@@ -88,14 +90,15 @@ class DySTUrbD_Epi(object):
         """
         Run the model, Gogogo!
         """
-        # self._simulate()
+        self._simulate()
 
-    def _log_time(self, key, time):
+    def _log_time(self, key, time, DEBUG=False):
         """
         Save the computational time to model.res
         """
         self.res["Time"][key] = time
-        print(f"{key}: {time}")
+        if DEBUG:
+            print(f"{key}: {time}")
 
     def _log_stats(self, day, key, data):
         """
@@ -253,7 +256,7 @@ class DySTUrbD_Epi(object):
         for day in range(1, recover):
             cnt = mask & (self.agents.period["sick"] == day)
             cnt = cnt.count_nonzero()
-            contagious_strength = self.gamma.log.prob(day).exp()
+            contagious_strength = self.gamma.log_prob(day).exp()
             sum_I += cnt * contagious_strength
 
         res = new_inf / sum_I if sum_I > 0 else 0
@@ -299,7 +302,7 @@ class DySTUrbD_Epi(object):
         """
         ab_house = self.network.AB["house"]
         a_inf = self.agents.get_infected()
-        inf_house = ab_house.mul(a_inf)
+        inf_house = ab_house.mul(a_inf.view(-1, 1))
 
         total = ab_house.sum(0)
         inf = inf_house.sum(0)
@@ -335,10 +338,32 @@ class DySTUrbD_Epi(object):
         for idx in range(num_SA):
             mask = ASA[:, idx]  # step 2
             infecting_a = mask.view(-1, 1) & inf_mat  # step 3
-            infecting_a = infecting_a.sum(0).bool()  # step 4 (1, A)
-            res[idx] = infecting_a @ ASA  # step 5 (1, SA)
+            infecting_a = infecting_a.sum(0)  # step 4 (1, A)
+            res[idx] = infecting_a @ ASA.long()  # step 5 (1, SA)
 
         return res  # (SA, SA)
+
+    def _get_vis_R(self, day):
+        """
+        Return vis_R according to lockdown scenario and day
+
+        Parameter
+        ---------
+        day : int
+
+        Return
+        -------
+        vis_R: int if not diff else dict
+        prev_vis_R: int if not diff else dict
+        """
+        if not self.scenario["DIFF"]:
+            vis_R = self.res["Results"]["Stats"][day - 7]["R_total"]
+            prev_vis_R = self.res["Results"]["Stats"][day - 8]["R_total"]
+        else:
+            vis_R = self.res["Results"]["SAs"][day - 7]
+            prev_vis_R = self.res["Results"]["SAs"][day - 8]
+
+        return vis_R, prev_vis_R
 
     def _simulate(self):
         """
@@ -357,6 +382,9 @@ class DySTUrbD_Epi(object):
         num_inf = self.agents.get_infected().count_nonzero()
         day = 1
         while num_inf > 0:
+            print()
+            print()
+            print("Day:", day)
 
             """
             Computation to obtain data
@@ -365,6 +393,7 @@ class DySTUrbD_Epi(object):
             routine = self.agents.update_routine(
                 self.buildings.status, self.network.AB["house"]
             )  # A copy of updated routine
+
             t2 = time()
             self._log_time("Update Rountine", t2 - t1)
 
@@ -402,7 +431,7 @@ class DySTUrbD_Epi(object):
             t10 = time()
             self._log_time("Update Recovery", t10 - t9)
 
-            R_total = self._compute_R(torch.ones_like(self.agents.status), day)
+            R_total = self._compute_R(torch.ones_like(self.agents.status).bool(), day)
             t11 = time()
             self._log_time("Compute overall R", t11 - t10)
 
@@ -418,19 +447,23 @@ class DySTUrbD_Epi(object):
             t14 = time()
             self._log_time("Compute IO matrix", t14 - t13)
 
-            self.buildings.update_lockdown()
-            t15 = time()
-            self._log_time("Update lockdown", t15 - t14)
+            if day > 9:
+                vis_R, prev_vis_R = self._get_vis_R(day)
+                self.buildings.update_lockdown(vis_R, prev_vis_R)
+                t15 = time()
+                self._log_time("Update lockdown", t15 - t14)
 
-            num_inf = self.agents.get_infected.count_nonzero()
+            num_inf = self.agents.get_infected().count_nonzero()
             num_qua = self.agents.get_quarantined().count_nonzero()
             num_death = self.agents.get_dead().count_nonzero()
             num_admission = self.agents.get_hospitalized().count_nonzero()
             num_recovered = self.agents.get_recovered().count_nonzero()
             total_inf = (
                 num_inf
-                if day == 0
-                else self.res["Results"]["Stats"][day - 1]["Total Infections"] + new_inf
+                if day == 1
+                else (
+                    self.res["Results"]["Stats"][day - 1]["Total Infections"] + new_inf
+                )
             )
             num_susceptible = self.agents.identity["id"].shape[0] - total_inf
             num_closed = self.buildings.get_closed().count_nonzero()
@@ -439,10 +472,11 @@ class DySTUrbD_Epi(object):
             """
             res = {}
             self.res["Results"]["SAs"][day] = R_sa
+            self.res["Results"]["Buildings"][day] = {}
             self.res["Results"]["Buildings"][day]["inf"] = b_inf.tolist()
             self.res["Results"]["Buildings"][day]["ratio"] = b_ratio.tolist()
             self.res["Results"]["IO_mat"][day] = io_mat
-            self.red["Results"]["daily_infection"].append(inf_mat)
+            self.res["Results"]["daily_infection"].append(inf_mat)
             self.res["Results"]["Stats"][day] = {}
             self._log_stats(day, "Total Infections", total_inf)
             self._log_stats(day, "Active Infections", num_inf)
@@ -458,5 +492,17 @@ class DySTUrbD_Epi(object):
             self._log_stats(day, "R_total", R_total)
             self._log_stats(day, "Closed Buildings", num_closed)
             self._log_stats(day, "Susceptible Agents:", num_susceptible)
+
+            print()
+            print("DEBUG")
+            print("Status-1:", (self.agents.status == 1).count_nonzero())
+            print("Status-2:", (self.agents.status == 2).count_nonzero())
+            print("Status-3:", (self.agents.status == 3).count_nonzero())
+            print("Status-4:", (self.agents.status == 4).count_nonzero())
+            print("Status-5:", (self.agents.status == 5).count_nonzero())
+            print("Status-6:", (self.agents.status == 6).count_nonzero())
+            print("Status-7:", (self.agents.status == 7).count_nonzero())
+            print("Status-8:", (self.agents.status == 8).count_nonzero())
+            print()
 
             day += 1

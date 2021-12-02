@@ -593,12 +593,13 @@ class Agents(object):
         ---------
         day : int
         """
+        a_inf = self.get_infected()
         a_qua = self.get_quarantined()
         a_hos = self.get_hospitalized()
-        a_dead = self.get_dead()
-        self.period["sick"][a_inf] = day - self.start["sick"]
-        self.period["quarantine"][a_qua] = day - self.start["quarantine"]
-        self.period["admission"][a_hos] = day - self.start["admission"]
+
+        self.period["sick"][a_inf] = day - self.start["sick"][a_inf]
+        self.period["quarantine"][a_qua] = day - self.start["quarantine"][a_qua]
+        self.period["admission"][a_hos] = day - self.start["admission"][a_hos]
 
     def reset_period(self, mask, key):
         """
@@ -622,8 +623,8 @@ class Agents(object):
         """
         a_no_admit = self.get_no_admit()
         a_uninf = (self.status == 1) | (self.status == 3)
-        tmp_risk = self.risk["admission"]
-        tmp_risk *= ~(a_uninf | a_no_admit).int()  # remove admission risk
+        tmp_risk = self.risk["admission"].detach().clone()
+        tmp_risk *= (~(a_uninf | a_no_admit)).long()  # remove admission risk
         rand_threshold = torch.zeros_like(tmp_risk).uniform_(0, 1)
         admission = tmp_risk > rand_threshold
 
@@ -645,7 +646,8 @@ class Agents(object):
         mask : torch.Tensor (A, 1)
         status : int
         """
-        self.status[mask] = status
+        if mask.count_nonzero() != 0:
+            self.status[mask] = status
 
     def update_start(self, mask, key, day):
         """
@@ -669,8 +671,8 @@ class Agents(object):
         """
         a_no_death = self.get_no_death()
         a_unhos = self.status != 6
-        tmp_risk = self.risk["mortality"]
-        tmp_risk *= ~(a_unhos | a_no_death).int()  # remove admission risk
+        tmp_risk = self.risk["mortality"].detach().clone()
+        tmp_risk *= (~(a_unhos | a_no_death)).long()  # remove admission risk
         rand_risk = torch.zeros_like(tmp_risk).uniform_(0, 1)
         death = tmp_risk > rand_risk
         self.update_status(death, 8)
@@ -698,11 +700,11 @@ class Agents(object):
         b_inf = (
             routine[a_inf].sum(0).bool()
         )  # get a list of buildings visited by infected agents
-        a_exposed = (routine.add(b_inf) == 2).sum(
+        a_exposed = (routine.logical_and(b_inf)).sum(
             1
         ) & ~a_inf  # uninfected agents visited same buildings
 
-        contagious_strength = gamma.log.prob(self.period["sick"]).exp()
+        contagious_strength = gamma.log_prob(self.period["sick"]).exp()
 
         res = self.interaction * contagious_strength
         res *= a_inf  # only interaction with infected agent
@@ -730,23 +732,24 @@ class Agents(object):
         #TODO: Shall we add a workplace or similar thematic network to detect any potential cluster?
         """
         a_qua = self.get_quarantined()
-        sparse_risk = self.get_exposed_risk(self, routine, gamma)
+        sparse_risk = self.get_exposed_risk(routine, gamma)
 
         rand_threshold = torch.zeros_like(sparse_risk).uniform_(0, 1)
         infection = sparse_risk > rand_threshold
 
-        inf_qua = infection & a_qua
-        inf_no_qua = infection & ~a_qua
+        inf_reduced = infection.sum(1).bool()
+        inf_qua = inf_reduced & a_qua
+        inf_no_qua = inf_reduced & ~a_qua
 
         self.update_status(inf_no_qua, 2)
         self.update_start(inf_no_qua, "sick", day)
         self.update_status(inf_qua, 5)
         self.update_start(inf_qua, "sick", day)
 
-        res1 = infection.count_nonzero()
+        res1 = inf_reduced.count_nonzero()
         res2 = inf_qua.count_nonzero()
 
-        return res, res2, infection
+        return res1, res2, infection
 
     def end_quarantine(self):
         """
@@ -817,7 +820,7 @@ class Agents(object):
 
         a_new_diag = (self.status == 5) & (self.period["sick"] == threshold)
         a_qua = self.get_quarantined()  # get family family already in quarantine
-        idx_h = network_house[a_new_diag].argmax(dim=1)
+        idx_h = network_house[a_new_diag].long().argmax(dim=1)
         h_to_a = network_house.t()
 
         idx_family = h_to_a[idx_h].nonzero(as_tuple=True)[1]
@@ -833,7 +836,7 @@ class Agents(object):
         self.update_status(a_healthy, 3)
         self.update_status(a_infected, 4)
 
-        res = a_family.count_nonzero()
+        res = a_infected.count_nonzero()
 
         return res
 

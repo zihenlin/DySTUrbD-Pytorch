@@ -239,6 +239,11 @@ class Buildings(object):
 
         res = torch.ones_like(self.status)
         b_mask = self.get_SA_masks() if self.scenario["DIFF"] else [self.status]
+        vis_R = list(vis_R.values()) if self.scenario["DIFF"] else [vis_R]
+        prev_vis_R = (
+            list(prev_vis_R.values()) if self.scenario["DIFF"] else [prev_vis_R]
+        )
+
         assert len(b_mask) == len(
             vis_R
         ), "Number of Building masks is not equal to number of vis_R"
@@ -250,10 +255,10 @@ class Buildings(object):
                         res[b_mask[idx] & theme_mask] = 0
                     else:
                         res = self.status
-                elif vis_R >= 2:
-                    res[b_mask & self.theme_mask] = 0
+                elif vis_R[idx] >= 2:
+                    res[b_mask[idx] & self.theme_mask] = 0
             else:
-                if vis_R >= 1:
-                    res[b_mask & self.theme_mask] = 0
+                if vis_R[idx] >= 1:
+                    res[b_mask[idx] & self.theme_mask] = 0
 
         self.status = res
