@@ -9,7 +9,7 @@ import torch
 from scipy.sparse import csr_matrix
 import psutil  # get number of CPU cores
 from time import time
-import numpy as np
+import gc
 
 import buildings
 import agents
@@ -347,7 +347,9 @@ class DySTUrbD_Epi(object):
             mask = ASA[:, idx]  # step 2
             infecting_a = mask.view(-1, 1) & inf_mat  # step 3
             infecting_a = infecting_a.sum(0)  # step 4 (1, A)
-            res[idx] = infecting_a @ ASA.long()  # step 5 (1, SA)
+            res[idx] = (infecting_a.float() @ ASA.float()).bool()  # step 5 (1, SA)
+
+        del ASA
 
         return res  # (SA, SA)
 
@@ -517,3 +519,4 @@ class DySTUrbD_Epi(object):
             print()
 
             day += 1
+            gc.collect()
