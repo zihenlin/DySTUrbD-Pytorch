@@ -577,7 +577,7 @@ class Agents(object):
         a_qua = self.get_quarantined()
         a_hos = self.get_hospitalized()
         a_dead = self.get_dead()
-        res = self.routine.detach().copy()
+        res = self.routine.detach().clone()
         res *= b_status  # building open or close
         res[a_qua] = network_house[a_qua]
         res[a_hos] &= False
@@ -704,7 +704,7 @@ class Agents(object):
             1
         ) & ~a_inf  # uninfected agents visited same buildings
 
-        contagious_strength = gamma.log_prob(self.period["sick"]).exp()
+        contagious_strength = gamma.log_prob(self.period["sick"]).to(self.device).exp()
 
         res = self.interaction * contagious_strength
         res *= a_inf  # only interaction with infected agent

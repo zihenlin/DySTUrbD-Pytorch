@@ -57,7 +57,7 @@ class Buildings(object):
             path, self.device, cols=[6, 2, 3, 12, 4, 2, 14, 15, 17, 18], nrows=1200
         )
         self.identity = {
-            "idx": torch.arange(data.shape[0]),
+            "idx": torch.arange(data.shape[0], device=self.device),
             "id": data[:, 0],
             "area": self._get_SA_idx(data[:, 3]),
             "X": data[:, 6],
@@ -197,8 +197,6 @@ class Buildings(object):
 
         res = (
             torch.zeros_like(self.status)
-            if ~self.theme["ALL"]
-            else torch.ones_like(self.status)
             if gradual
             else torch.randint_like(self.status, 0, 2)
         )

@@ -258,7 +258,7 @@ class DySTUrbD_Epi(object):
             cnt = cnt.count_nonzero()
             if DEBUG and today >= 8 and cnt > 0:
                 print("day", day, ":", cnt)
-            contagious_strength = self.gamma.log_prob(day).exp()
+            contagious_strength = self.gamma.log_prob(day).to(self.device).exp()
             sum_I += cnt * contagious_strength
 
         res = new_inf / sum_I if sum_I.gt(0.0) else 0
@@ -418,7 +418,7 @@ class DySTUrbD_Epi(object):
             self._log_time("Update Death", t5 - t4)
 
             new_inf, new_qua, inf_mat = self.agents.update_infection(
-                day, routine, self.gamma
+                day, routine.detach().clone(), self.gamma
             )
             t6 = time()
             self._log_time("Update Infection", t6 - t5)
