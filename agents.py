@@ -577,7 +577,7 @@ class Agents(object):
         a_qua = self.get_quarantined()
         a_hos = self.get_hospitalized()
         a_dead = self.get_dead()
-        res = self.routine
+        res = self.routine.detach().copy()
         res *= b_status  # building open or close
         res[a_qua] = network_house[a_qua]
         res[a_hos] &= False

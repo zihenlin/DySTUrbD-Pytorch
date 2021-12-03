@@ -238,7 +238,7 @@ class Buildings(object):
         # Get thematic mask
 
         res = torch.ones_like(self.status)
-        b_mask = self.get_SA_masks() if self.scenario["DIFF"] else [self.status]
+        b_mask = self.get_SA_masks() if self.scenario["DIFF"] else [res]
         vis_R = list(vis_R.values()) if self.scenario["DIFF"] else [vis_R]
         prev_vis_R = (
             list(prev_vis_R.values()) if self.scenario["DIFF"] else [prev_vis_R]
@@ -259,6 +259,6 @@ class Buildings(object):
                     res[b_mask[idx] & self.theme_mask] = 0
             else:
                 if vis_R[idx] >= 1:
-                    res[b_mask[idx] & self.theme_mask] = 0
+                    res &= b_mask[idx] & self.theme_mask
 
         self.status = res

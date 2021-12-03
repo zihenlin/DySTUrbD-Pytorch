@@ -142,9 +142,9 @@ class DySTUrbD_Epi(object):
         -------
         res : torch.Tensor (A+B, A+B)
         """
-        AA = self.network.AA
-        BB = self.network.BB
-        AB = self.network.AB["total"]
+        AA = self.network.AA.detach().clone()
+        BB = self.network.BB.detach().clone()
+        AB = self.network.AB["total"].detach().clone()
         BA = torch.zeros_like(AB.T, device=self.device)
 
         AAAB = torch.cat((AA, AB), 1)
@@ -200,12 +200,12 @@ class DySTUrbD_Epi(object):
         dummy_bb = torch.zeros((1, num_bb), device=self.device)  # empty row
         nodes_bb = torch.cat((nodes_bb, dummy_bb), 0)
 
-        res = self.network.AB["total"]
+        res = self.network.AB["total"].detach().clone()
         start = ["house", "anchor", "trivial"]
         end = ["anchor", "trivial", "house"]
 
         for s, e in zip(start, end):
-            nodes_end = self.network.AB[e]
+            nodes_end = self.network.AB[e].detach().clone()
             dummy_end = ~(nodes_end.sum(1).bool())  # point to empty row
             nodes_end = torch.cat((nodes_end, dummy_end.view(-1, 1)), 1)
             idx_end = nodes_end.long().argmax(
@@ -215,7 +215,7 @@ class DySTUrbD_Epi(object):
             for cnt in range(2):
                 template = torch.zeros_like(self.network.AB["total"])
 
-                nodes_start = self.network.AB[s] if cnt < 1 else choice
+                nodes_start = self.network.AB[s].detach().clone() if cnt < 1 else choice
                 dummy_start = ~(nodes_start.sum(1).bool())  # point to empty row
                 nodes_start = torch.cat((nodes_start, dummy_start.view(-1, 1)), 1)
                 idx_start = nodes_start.long().argmax(
@@ -235,7 +235,7 @@ class DySTUrbD_Epi(object):
 
         return res
 
-    def _compute_R(self, mask, today):
+    def _compute_R(self, mask, today, DEBUG=False):
         """
         Compute R value using number of new cases and expected infectious risk.
 
@@ -250,16 +250,25 @@ class DySTUrbD_Epi(object):
         """
         sum_I = 0
         recover = 21  # hyperparameter
-        new_inf = mask & (self.agents.period["sick"] == today)
+        new_inf = mask & (self.agents.start["sick"] == today)
         new_inf = new_inf.count_nonzero()
 
-        for day in range(1, recover):
+        for day in range(7, recover + 1):
             cnt = mask & (self.agents.period["sick"] == day)
             cnt = cnt.count_nonzero()
+            if DEBUG and today >= 8 and cnt > 0:
+                print("day", day, ":", cnt)
             contagious_strength = self.gamma.log_prob(day).exp()
             sum_I += cnt * contagious_strength
 
-        res = new_inf / sum_I if sum_I > 0 else 0
+        res = new_inf / sum_I if sum_I.gt(0.0) else 0
+        if DEBUG and today >= 8:
+            print()
+            print("computer_R")
+            print("new_inf", new_inf)
+            print("sum_I", sum_I)
+            print("res", res)
+            print()
 
         return res
 
@@ -300,7 +309,7 @@ class DySTUrbD_Epi(object):
         inf : torch.Tensor
         ratio : torch.Tensor
         """
-        ab_house = self.network.AB["house"]
+        ab_house = self.network.AB["house"].detach().clone()
         a_inf = self.agents.get_infected()
         inf_house = ab_house.mul(a_inf.view(-1, 1))
 
@@ -329,8 +338,7 @@ class DySTUrbD_Epi(object):
         -------
         res : torch.Tensor (SA, SA)
         """
-        ASA = self.network.ASA  # (A, SA)
-        num_a = ASA.shape[0]
+        ASA = self.network.ASA.detach().clone()  # (A, SA)
         num_SA = ASA.shape[1]
 
         res = torch.zeros((num_SA, num_SA))
@@ -391,7 +399,7 @@ class DySTUrbD_Epi(object):
             """
             t1 = time()
             routine = self.agents.update_routine(
-                self.buildings.status, self.network.AB["house"]
+                self.buildings.status, self.network.AB["house"].detach().clone()
             )  # A copy of updated routine
 
             t2 = time()
@@ -423,7 +431,9 @@ class DySTUrbD_Epi(object):
             t8 = time()
             self._log_time("Update Diagnosis", t8 - t7)
 
-            new_qua += self.agents.update_diagnosed_family(day, self.network.AH)
+            new_qua += self.agents.update_diagnosed_family(
+                day, self.network.AH.detach().clone()
+            )
             t9 = time()
             self._log_time("Update Diagnosed Family", t9 - t8)
 
@@ -431,7 +441,9 @@ class DySTUrbD_Epi(object):
             t10 = time()
             self._log_time("Update Recovery", t10 - t9)
 
-            R_total = self._compute_R(torch.ones_like(self.agents.status).bool(), day)
+            R_total = self._compute_R(
+                torch.ones_like(self.agents.status).bool(), day, DEBUG=True
+            )
             t11 = time()
             self._log_time("Compute overall R", t11 - t10)
 
@@ -470,7 +482,6 @@ class DySTUrbD_Epi(object):
             """
             Logging data to output
             """
-            res = {}
             self.res["Results"]["SAs"][day] = R_sa
             self.res["Results"]["Buildings"][day] = {}
             self.res["Results"]["Buildings"][day]["inf"] = b_inf.tolist()
