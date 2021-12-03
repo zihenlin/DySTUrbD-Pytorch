@@ -8,6 +8,7 @@ For the details of the attribute, please refer to readme.
 """
 
 import torch
+import gc
 
 
 class Networks(object):
@@ -25,6 +26,8 @@ class Networks(object):
         self.AB = self.__agent_building(agents, buildings, device)
         self.AH = self.__agent_household(agents)
         self.ASA = self.__agent_SA(agents, buildings)
+
+        gc.collect()
 
     def __building_building(self, buildings):
         """
@@ -44,7 +47,7 @@ class Networks(object):
         """
         beta = 2
         threshold = 0.00161
-        vol = buildings.floor["volume"]
+        vol = buildings.floor["volume"].detach().clone()
         coor = torch.cat(
             (
                 buildings.identity["X"].view(-1, 1),
@@ -58,9 +61,8 @@ class Networks(object):
         scores = scores.fill_diagonal_(0)
         res = scores.div(torch.sum(scores, 1).view(-1, 1))
         res[res < threshold] = 0
-        # res = -torch.log(res)
-        # res = torch.nan_to_num(res, posinf=100)
 
+        del beta, threshold, vol, coor, distance, scores
         return res
 
     def __agent_agent(self, agents, buildings, device):
@@ -91,9 +93,7 @@ class Networks(object):
         res[h == h.view(-1, 1)] = 1  # same house gets max probability
         res[res < threshold] = 0
 
-        # res = -torch.log(res)
-        # res = torch.nan_to_num(res, posinf=100)
-
+        del threshold, income, age, dist, w, h
         return res
 
     def __income_sim(self, agents, device):
@@ -133,6 +133,7 @@ class Networks(object):
         res = age.sub(age.view(-1, 1)).abs()
         res = 1 - (res / torch.max(res))
 
+        del age
         return res
 
     def __house_dist(self, agents, buildings):
@@ -156,7 +157,7 @@ class Networks(object):
         res = torch.cdist(coor, coor)
         res = 1 - (res / torch.max(res))
 
-        del h_idx, coor
+        del agent_homes, id_b, h_idx, coor
         return res
 
     def __agent_building(self, agents, buildings, device):
@@ -191,9 +192,7 @@ class Networks(object):
             ).bool()
             res["total"] = res["total"] | res[val]
 
-        # res["total"] = -torch.log(res["total"])
-        # res["total"] = torch.nan_to_num(res["total"], posinf=100)
-
+        del type_b, num_a, num_b
         return res
 
     def __agent_household(self, agents):
@@ -223,6 +222,7 @@ class Networks(object):
             agents.identity["house"].long(), num_classes=num_h
         ).bool()
 
+        del num_a, num_h
         return res
 
     def __agent_SA(self, agents, buildings):
@@ -252,4 +252,5 @@ class Networks(object):
             agents.identity["area"].long(), num_classes=num_SA
         ).bool()
 
+        del num_a, num_SA
         return res

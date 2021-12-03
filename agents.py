@@ -8,6 +8,7 @@ For the details of the attribute, please refer to readme.
 """
 
 import torch
+import gc
 
 import util
 
@@ -49,6 +50,8 @@ class Agents(object):
         self.period = self._init_period()
         self.status = self._init_status()
 
+        gc.collect()
+
     def _init_identity(self, path):
         """
         Initialize identities.
@@ -79,6 +82,8 @@ class Agents(object):
         res["age"] = self._group_to_age(res["group"])
         res["religious"] = self._assign_religious(res["house"])
 
+        del data, keys, h_unique, mask
+
         return res
 
     def _group_to_age(self, group):
@@ -103,6 +108,7 @@ class Agents(object):
                 lower[k], upper[k], (v.count_nonzero().item(),), device=self.device
             ).byte()
 
+        del masks, lower, upper
         return res
 
     def _assign_religious(self, house):
@@ -126,6 +132,7 @@ class Agents(object):
             mask = house == house_id[idx]
             res[mask] = is_religious[idx]
 
+        del mask, house_id, house_num, is_religious
         return res
 
     def _load_house(self, path, b):
@@ -154,6 +161,7 @@ class Agents(object):
             res["house"][mask] = idx
             self.identity["area"][mask] = b.identity["area"][idx]
 
+        del mask
         return res
 
     def _load_employ(self, path):
@@ -193,6 +201,7 @@ class Agents(object):
             else:
                 res["income"][mask] = 0
 
+        del data, keys, mask, align, houses, mask_h, mask_i, num
         return res
 
     def _init_building_activity(self, path, buildings):
@@ -220,6 +229,7 @@ class Agents(object):
         b["anchor"] = self._assign_anchor(idx, buildings.activity, jobs)
         b["trivial"] = self._assign_trivial(idx, buildings.activity)
 
+        del jobs, mask, idx
         return b, j
 
     def _create_job(self, b):
@@ -265,6 +275,7 @@ class Agents(object):
             res["building"][cnt : cnt + num] = idx
             cnt += num
 
+        del (job_density, job_floor, land_use, job_num, total, cnt)
         return res
 
     def _assign_job(self, jobs, mask, j):
@@ -303,6 +314,7 @@ class Agents(object):
         j["status"][idx_a] = 0
         j["local"][idx_a] = 0
 
+        del num_j, num_a, idx_a, limit, random, idx_j, agent, job
         return res
 
     def _anchor_index(self, religious, age, job):
@@ -338,6 +350,7 @@ class Agents(object):
             "etcR": r_idx,
         }
 
+        del r_idx, kinder, elem, high, uni
         return res
 
     def _assign_anchor(self, idx, a, jobs):
@@ -381,6 +394,7 @@ class Agents(object):
                 mask = torch.randint(2, size=(num_a,), device=self.device)
                 res[agents] &= mask
 
+        del has_job, anchor, val, agents, num_a, building, num_b, random, mask
         return res
 
     def _assign_trivial(self, idx, a):
@@ -411,6 +425,7 @@ class Agents(object):
             mask = torch.randint(2, size=(num_a,), device=self.device)
             res[agents] *= mask
 
+        del etc, val, agents, num_a, building, num_b, random, mask
         return res
 
     def _init_risk(self, args, age):
@@ -444,6 +459,7 @@ class Agents(object):
             risk[risk < 0] = 0
             res[key] = risk
 
+        del risks, risk, mask
         return res
 
     def _init_start_date(self):
@@ -459,6 +475,7 @@ class Agents(object):
         for key in keys:
             res[key] = torch.zeros((self.identity["id"].shape[0],), device=self.device)
 
+        del keys
         return res
 
     def _init_period(self):
@@ -474,6 +491,7 @@ class Agents(object):
         for key in keys:
             res[key] = torch.zeros((self.identity["id"].shape[0],), device=self.device)
 
+        del keys
         return res
 
     def _init_status(self):
@@ -493,6 +511,7 @@ class Agents(object):
         infected = torch.randperm(num, device=self.device)[:20]
         res[infected] = 2
 
+        del num, infected
         return res
 
     def set_interaction(self, prob_AA):
@@ -583,6 +602,7 @@ class Agents(object):
         res[a_hos] &= False
         res[a_dead] &= False
 
+        del a_qua, a_hos, a_dead
         return res
 
     def update_period(self, day):
@@ -600,6 +620,8 @@ class Agents(object):
         self.period["sick"][a_inf] = day - self.start["sick"][a_inf]
         self.period["quarantine"][a_qua] = day - self.start["quarantine"][a_qua]
         self.period["admission"][a_hos] = day - self.start["admission"][a_hos]
+
+        del a_qua, a_hos, a_inf
 
     def reset_period(self, mask, key):
         """
@@ -634,6 +656,7 @@ class Agents(object):
         self.update_start(admission, "quarantine", 0)
 
         res = admission.count_nonzero()
+        del a_no_admit, a_uninf, tmp_risk, rand_threshold, admission
 
         return res
 
@@ -678,6 +701,7 @@ class Agents(object):
         self.update_status(death, 8)
         res = death.count_nonzero()
 
+        del a_no_death, a_unhos, tmp_risk, rand_risk, death
         return res
 
     def get_exposed_risk(self, routine, gamma):
@@ -711,6 +735,8 @@ class Agents(object):
         res *= self.risk["infection"].view(-1, 1)
         res *= a_exposed.view(-1, 1)  # only exposed agents
         res *= 0.08  # normalize factor
+
+        del a_inf, b_inf, a_exposed, contagious_strength
 
         return res
 
@@ -749,6 +775,8 @@ class Agents(object):
         res1 = inf_reduced.count_nonzero()
         res2 = inf_qua.count_nonzero()
 
+        del a_qua, sparse_risk, rand_threshold, inf_reduced, inf_qua, inf_no_qua
+
         return res1, res2, infection
 
     def end_quarantine(self):
@@ -765,6 +793,8 @@ class Agents(object):
         self.update_status(a_end_qua & a_undiagnosed, 2)  # undiagnosed infected agents
         self.reset_period(a_end_qua, "quarantine")
         self.update_start(a_end_qua, "quarantine", 0)  # reset
+
+        del a_end_qua, a_healthy, a_undiagnosed
 
     def update_diagnosis(self, day):
         """
@@ -791,6 +821,7 @@ class Agents(object):
 
         res = new_qua.count_nonzero()
 
+        del a_diagnosed, a_free, a_qua, new_qua
         return res
 
     def update_diagnosed_family(self, day, network_house):
@@ -838,6 +869,16 @@ class Agents(object):
 
         res = a_infected.count_nonzero()
 
+        del (
+            a_new_diag,
+            a_qua,
+            idx_h,
+            h_to_a,
+            idx_family,
+            a_family,
+            a_healthy,
+            a_infected,
+        )
         return res
 
     def update_recovery(self):
@@ -862,4 +903,5 @@ class Agents(object):
 
         res = (a_qua | a_hos).count_nonzero()
 
+        del a_qua, a_hos
         return res

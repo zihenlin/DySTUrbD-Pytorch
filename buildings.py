@@ -8,6 +8,7 @@ The attributes with specific values are annotated.
 
 import itertools  # to flatten nested list
 import torch
+import gc
 
 import util
 
@@ -84,6 +85,7 @@ class Buildings(object):
         self.theme = theme
         self.theme_mask = self.get_thematic_mask()
         self.scenario = scenario
+        gc.collect()
 
     def _get_SA_idx(self, data):
         """
@@ -104,6 +106,7 @@ class Buildings(object):
             mask = data == SAs[idx]
             res[mask] = idx
 
+        del SAs
         return res
 
     def _create_activity(self):
@@ -120,7 +123,7 @@ class Buildings(object):
         """
         res = dict()
         for key, val in self.usg_dict.items():
-            res[key] = torch.Tensor([False]).bool().to(self.device)
+            res[key] = torch.BoolTensor([False], device=self.device)
             for usg in val:
                 res[key] = res[key] | (self.usg["specific"] == usg)
             res[key] = self.identity["idx"][res[key].view(-1)]
@@ -197,7 +200,9 @@ class Buildings(object):
 
         res = (
             torch.zeros_like(self.status)
-            if gradual
+            if not self.theme["ALL"]
+            else torch.ones_like(self.status)
+            if not gradual
             else torch.randint_like(self.status, 0, 2)
         )
         # ALL
@@ -257,6 +262,7 @@ class Buildings(object):
                     res[b_mask[idx] & self.theme_mask] = 0
             else:
                 if vis_R[idx] >= 1:
-                    res &= b_mask[idx] & self.theme_mask
+                    res[b_mask[idx] & self.theme_mask] = 0
 
         self.status = res
+        del res, b_mask, vis_R, prev_vis_R

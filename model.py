@@ -518,5 +518,27 @@ class DySTUrbD_Epi(object):
             print("Status-8:", (self.agents.status == 8).count_nonzero())
             print()
 
+            if day == 25:
+                break
             day += 1
+            del (
+                num_admission,
+                num_closed,
+                num_death,
+                num_qua,
+                num_recovered,
+                num_susceptible,
+                new_admission,
+                new_death,
+                new_inf,
+                new_qua,
+                new_recovered,
+                routine,
+                R_total,
+                R_sa,
+                b_inf,
+                b_ratio,
+                io_mat,
+                total_inf,
+            )
             gc.collect()
