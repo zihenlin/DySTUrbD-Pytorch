@@ -721,12 +721,13 @@ class Agents(object):
 
         """
         a_inf = self.get_infected()
+        a_recovered = self.get_recovered()
         b_inf = (
             routine[a_inf].sum(0).bool()
         )  # get a list of buildings visited by infected agents
-        a_exposed = (routine.logical_and(b_inf)).sum(
-            1
-        ) & ~a_inf  # uninfected agents visited same buildings
+        a_exposed = (
+            (routine.logical_and(b_inf)).sum(1) & ~a_inf & ~a_recovered
+        )  # uninfected agents visited same buildings
 
         contagious_strength = gamma.log_prob(self.period["sick"]).to(self.device).exp()
 

@@ -233,6 +233,8 @@ class DySTUrbD_Epi(object):
 
                 res |= choice  # add new building to routine (some are zeros)
 
+        del (idx_0, nodes_ab, nodes_bb, dummy_bb)
+
         return res
 
     def _compute_R(self, mask, today, DEBUG=False):
@@ -292,6 +294,7 @@ class DySTUrbD_Epi(object):
             sa_a = self.agents.identity["area"] == sa
             res[sa] = self._compute_R(sa_a, day)
 
+        del sas
         return res
 
     def _get_building_inf(self):
@@ -316,6 +319,7 @@ class DySTUrbD_Epi(object):
         total = ab_house.sum(0)
         inf = inf_house.sum(0)
 
+        del ab_house, a_inf, inf_house
         return inf, inf.div(total.view(-1, 1))
 
     def _get_IO_mat(self, inf_mat):
@@ -349,7 +353,7 @@ class DySTUrbD_Epi(object):
             infecting_a = infecting_a.sum(0)  # step 4 (1, A)
             res[idx] = (infecting_a.float() @ ASA.float()).bool()  # step 5 (1, SA)
 
-        del ASA
+        del ASA, num_SA
 
         return res  # (SA, SA)
 
@@ -466,6 +470,7 @@ class DySTUrbD_Epi(object):
                 self.buildings.update_lockdown(vis_R, prev_vis_R)
                 t15 = time()
                 self._log_time("Update lockdown", t15 - t14)
+                del vis_R, prev_vis_R
 
             num_inf = self.agents.get_infected().count_nonzero()
             num_qua = self.agents.get_quarantined().count_nonzero()
@@ -542,3 +547,4 @@ class DySTUrbD_Epi(object):
                 total_inf,
             )
             gc.collect()
+            torch.cuda.empty_cache()

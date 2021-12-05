@@ -27,8 +27,10 @@ def epi_run(args):
         "DIFF": False,
         "GRADUAL": False,
     }
-    model = DySTUrbD_Epi(args, theme, scenario)
-    model()
+
+    with torch.no_grad():
+        model = DySTUrbD_Epi(args, theme, scenario)
+        model()
 
 
 if __name__ == "__main__":
