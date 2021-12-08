@@ -738,9 +738,10 @@ class Agents(object):
             (routine.logical_and(b_inf)).sum(1) & ~a_inf & ~a_recovered
         )  # uninfected agents visited same buildings
 
-        a_meet_a = (routine & a_exposed.view(-1, 1)).float() @ (
-            routine & a_inf.view(-1, 1)
+        a_meet_a = (routine * a_exposed.view(-1, 1)).float() @ (
+            routine * a_inf.view(-1, 1)
         ).T.float()
+        a_meet_a = a_meet_a.bool()
         a_meet_a.fill_diagonal_(0)
 
         contagious_strength = gamma.log_prob(self.period["sick"]).to(self.device).exp()

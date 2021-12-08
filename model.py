@@ -225,7 +225,16 @@ class DySTUrbD_Epi(object):
 
                 candidates = near_start & near_end  # overlap between two buildings
                 candidates = (candidates | nodes_ab) & ~(self.network.AB["total"])
-                idx_1 = candidates.double().multinomial(
+
+                idx_candidates = candidates == True
+                candidates_weight = candidates.detach().clone().float()
+                candidates_weight[idx_candidates] = torch.randint_like(
+                    ((idx_candidates).count_nonzero(),), 5, 8, dtype=torch.float
+                )
+                candidates_weight[~idx_candidates] = torch.randint_like(
+                    ((~idx_candidates).count_nonzero(),), 4, 7, dtype=torch.float
+                )
+                idx_1 = candidates_weight.double().multinomial(
                     1
                 )  # randomly pick one from each row
                 template[idx_0, idx_1.view(-1)] = 1
@@ -234,6 +243,7 @@ class DySTUrbD_Epi(object):
                 res |= choice  # add new building to routine (some are zeros)
 
         del (idx_0, nodes_ab, nodes_bb, dummy_bb)
+        exit()
 
         return res
 
@@ -255,7 +265,7 @@ class DySTUrbD_Epi(object):
         new_inf = mask & (self.agents.start["sick"] == today)
         new_inf = new_inf.count_nonzero()
 
-        for day in range(7, recover + 1):
+        for day in range(1, recover + 1):
             cnt = mask & (self.agents.period["sick"] == day)
             cnt = cnt.count_nonzero()
             if DEBUG and today >= 8 and cnt > 0:
