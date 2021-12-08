@@ -494,7 +494,7 @@ class DySTUrbD_Epi(object):
             self.res["Results"]["Buildings"][day]["inf"] = b_inf.tolist()
             self.res["Results"]["Buildings"][day]["ratio"] = b_ratio.tolist()
             self.res["Results"]["IO_mat"][day] = io_mat
-            self.res["Results"]["daily_infection"].append(inf_mat)
+            self.res["Results"]["daily_infection"].append(inf_mat.nonzero())
             self.res["Results"]["Stats"][day] = {}
             self._log_stats(day, "Total Infections", total_inf)
             self._log_stats(day, "Active Infections", num_inf)
@@ -523,8 +523,8 @@ class DySTUrbD_Epi(object):
             print("Status-8:", (self.agents.status == 8).count_nonzero())
             print()
 
-            if day == 25:
-                break
+            # if day == 25:
+            #     break
             day += 1
             del (
                 num_admission,

@@ -123,7 +123,7 @@ class Buildings(object):
         """
         res = dict()
         for key, val in self.usg_dict.items():
-            res[key] = torch.BoolTensor([False], device=self.device)
+            res[key] = torch.tensor([False], device=self.device, dtype=torch.bool)
             for usg in val:
                 res[key] = res[key] | (self.usg["specific"] == usg)
             res[key] = self.identity["idx"][res[key].view(-1)]
@@ -169,7 +169,7 @@ class Buildings(object):
         res : list
         """
         res = [
-            self.groupby_USG_or_SA(sa, "SA")
+            self.groupby_USG_or_SA([sa], "SA")
             for sa in self.identity["area"].unique(sorted=True)
         ]
 
@@ -214,18 +214,22 @@ class Buildings(object):
                 )
             ]
             edu_mask = self.groupby_USG_or_SA(edu_usg, "USG")
-            res &= edu_mask
+            res |= edu_mask
             if gradual:
                 idx = edu_mask.nonzero()
-                res[idx] = torch.randint(0, 2, (idx.shape[0], 1))
+                res[idx] = torch.randint(
+                    0, 2, (idx.shape[0], 1), dtype=torch.bool, device=self.device
+                )
 
         if self.theme["REL"]:
             rel_usg = self.usg_dict["religious"]
             rel_mask = self.groupby_USG_or_SA(rel_usg, "USG")
-            res &= rel_mask
+            res |= rel_mask
             if gradual:
                 idx = rel_mask.nonzero()
-                res[idx] = torch.randint(0, 2, (idx.shape[0], 1))
+                res[idx] = torch.randint(
+                    0, 2, (idx.shape[0], 1), dtype=torch.bool, device=self.device
+                )
 
         return res
 

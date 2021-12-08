@@ -699,6 +699,15 @@ class Agents(object):
         rand_risk = torch.zeros_like(tmp_risk).uniform_(0, 1)
         death = tmp_risk > rand_risk
         self.update_status(death, 8)
+
+        # reset quarantine, admission, sick period and start
+        self.reset_period(death, "sick")
+        self.reset_period(death, "quarantine")
+        self.reset_period(death, "admission")
+        self.update_start(death, "sick", 0)
+        self.update_start(death, "quarantine", 0)
+        self.update_start(death, "admission", 0)
+
         res = death.count_nonzero()
 
         del a_no_death, a_unhos, tmp_risk, rand_risk, death
@@ -729,15 +738,19 @@ class Agents(object):
             (routine.logical_and(b_inf)).sum(1) & ~a_inf & ~a_recovered
         )  # uninfected agents visited same buildings
 
+        a_meet_a = (routine & a_exposed.view(-1, 1)).float() @ (
+            routine & a_inf.view(-1, 1)
+        ).T.float()
+        a_meet_a.fill_diagonal_(0)
+
         contagious_strength = gamma.log_prob(self.period["sick"]).to(self.device).exp()
 
         res = self.interaction * contagious_strength
-        res *= a_inf  # only interaction with infected agent
+        res *= a_meet_a
         res *= self.risk["infection"].view(-1, 1)
-        res *= a_exposed.view(-1, 1)  # only exposed agents
-        res *= 0.08  # normalize factor
+        res *= 0.08  # normalize factor, hyperparam
 
-        del a_inf, b_inf, a_exposed, contagious_strength
+        del a_inf, b_inf, a_exposed, contagious_strength, a_meet_a
 
         return res
 
@@ -788,7 +801,6 @@ class Agents(object):
         a_end_qua = self.period["quarantine"] == threshold
         a_healthy = self.status == 3
         a_undiagnosed = self.status == 4
-        a_end_qua &= a_healthy | a_undiagnosed
 
         self.update_status(a_end_qua & a_healthy, 1)  # healthy agents
         self.update_status(a_end_qua & a_undiagnosed, 2)  # undiagnosed infected agents
@@ -817,7 +829,7 @@ class Agents(object):
         new_qua = a_diagnosed & a_free
         a_diagnosed &= a_free | a_qua
 
-        self.update_start(new_qua, "quarantine", day)
+        self.update_start(a_diagnosed, "quarantine", day)
         self.update_status(a_diagnosed, 5)
 
         res = new_qua.count_nonzero()
@@ -830,9 +842,9 @@ class Agents(object):
         Detect newly diagnosed agents and send their family to quarantine
 
         Idea:
-        network_house (A, B) is many-to-one, i.e., each row contains only one value.
+        network_house (A, H) is many-to-one, i.e., each row contains only one value.
         Using argmax, we obtained the household index of the newly diagnosed agents.
-        network_house tranpose (B,A) presents one-to-many, one building corresponds to multiple agents.
+        network_house tranpose (H,A) presents one-to-many, one building corresponds to multiple agents.
         Using tensor.nonzero(as_tuple=True), we obtain a list of agents which share the same households
         with newly diagnosed agents.
 
@@ -851,15 +863,13 @@ class Agents(object):
         threshold = 7
 
         a_new_diag = (self.status == 5) & (self.period["sick"] == threshold)
-        a_qua = self.get_quarantined()  # get family family already in quarantine
         idx_h = network_house[a_new_diag].long().argmax(dim=1)
         h_to_a = network_house.t()
 
         idx_family = h_to_a[idx_h].nonzero(as_tuple=True)[1]
         a_family = torch.zeros_like(self.status).long()
-        a_family[idx_h] = 1
+        a_family[idx_family] = 1
         a_family &= ~a_new_diag
-        a_family &= ~a_qua
 
         a_healthy = a_family & (self.status == 1)
         a_infected = a_family & (self.status == 2)
@@ -872,7 +882,6 @@ class Agents(object):
 
         del (
             a_new_diag,
-            a_qua,
             idx_h,
             h_to_a,
             idx_family,
@@ -891,7 +900,7 @@ class Agents(object):
         -------
         res : int
         """
-        threshold = [21, 28]
+        threshold = [21, 28]  # hyperparam
 
         a_qua = (self.status == 5) & (self.period["sick"] == threshold[0])
         a_hos = (self.status == 6) & (self.period["sick"] == threshold[1])
