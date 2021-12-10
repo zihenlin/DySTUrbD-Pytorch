@@ -229,10 +229,10 @@ class DySTUrbD_Epi(object):
                 idx_candidates = candidates == True
                 candidates_weight = candidates.detach().clone().float()
                 candidates_weight[idx_candidates] = torch.randint_like(
-                    ((idx_candidates).count_nonzero(),), 5, 8, dtype=torch.float
+                    ((idx_candidates).count_nonzero(),), 5, 6, dtype=torch.float
                 )
                 candidates_weight[~idx_candidates] = torch.randint_like(
-                    ((~idx_candidates).count_nonzero(),), 4, 7, dtype=torch.float
+                    ((~idx_candidates).count_nonzero(),), 5, 6, dtype=torch.float
                 )
                 idx_1 = candidates_weight.double().multinomial(
                     1

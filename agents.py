@@ -391,8 +391,10 @@ class Agents(object):
                 for i in range(num_a):
                     res[agents[i]] = building[random[i]]
             if "etc" in key:
-                mask = torch.randint(2, size=(num_a,), device=self.device)
-                res[agents] &= mask
+                mask = torch.randint(
+                    2, size=(num_a,), device=self.device, dtype=torch.bool
+                )
+                res[agents] = res[agents].masked_fill(mask, -1)
 
         del has_job, anchor, val, agents, num_a, building, num_b, random, mask
         return res
@@ -422,8 +424,8 @@ class Agents(object):
                 random = torch.randint(num_b, size=(num_a,), device=self.device)
                 for i in range(num_a):
                     res[agents[i]] = building[random[i]]
-            mask = torch.randint(2, size=(num_a,), device=self.device)
-            res[agents] *= mask
+            mask = torch.randint(2, size=(num_a,), device=self.device, dtype=torch.bool)
+            res[agents] = res[agents].masked_fill(mask, -1)
 
         del etc, val, agents, num_a, building, num_b, random, mask
         return res

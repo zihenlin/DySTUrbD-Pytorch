@@ -187,10 +187,12 @@ class Networks(object):
         res["total"] = torch.zeros((num_a, num_b), device=device, dtype=torch.bool)
 
         for val in type_b:
-            res[val] = torch.nn.functional.one_hot(
-                agents.building[val].long(), num_classes=num_b
-            ).bool()
-            res["total"] = res["total"] | res[val]
+            a = agents.building[val].detach().clone().long()
+            a_empty = a == -1
+            a[a_empty] = 0  # temporary value
+            res[val] = torch.nn.functional.one_hot(a, num_classes=num_b).bool()
+            res[val] &= ~a_empty.view(-1, 1)
+            res["total"] |= res[val]
 
         del type_b, num_a, num_b
         return res
