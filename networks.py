@@ -12,7 +12,7 @@ import gc
 
 
 class Networks(object):
-    def __init__(self, agents, buildings, device):
+    def __init__(self, args, agents, buildings, device):
         """
         Create three networks.
 
@@ -21,15 +21,15 @@ class Networks(object):
         3. AB - agent - building
         4. AH - agent - household
         """
-        self.BB = self.__building_building(buildings)
-        self.AA = self.__agent_agent(agents, buildings, device)
+        self.BB = self.__building_building(args, buildings)
+        self.AA = self.__agent_agent(args, agents, buildings, device)
         self.AB = self.__agent_building(agents, buildings, device)
         self.AH = self.__agent_household(agents)
         self.ASA = self.__agent_SA(agents, buildings)
 
         gc.collect()
 
-    def __building_building(self, buildings):
+    def __building_building(self, args, buildings):
         """
         Initialize building building network.
 
@@ -45,8 +45,8 @@ class Networks(object):
         --------
         res : torch.Tensor
         """
-        beta = 2
-        threshold = 0.00161
+        beta = args["BB"]["beta"]
+        threshold = args["BB"]["threshold"]
         vol = buildings.floor["volume"].detach().clone()
         coor = torch.cat(
             (
@@ -65,7 +65,7 @@ class Networks(object):
         del beta, threshold, vol, coor, distance, scores
         return res
 
-    def __agent_agent(self, agents, buildings, device):
+    def __agent_agent(self, args, agents, buildings, device):
         """
         Initialize Agent - Agent network.
 
@@ -82,11 +82,11 @@ class Networks(object):
         --------
         res : torch.Tensor
         """
-        threshold = 0.95
+        threshold = args["AA"]["threshold"]
         income = self.__income_sim(agents, device)
         age = self.__age_sim(agents)
         dist = self.__house_dist(agents, buildings)
-        w = {"income": 1, "age": 1, "dist": 1}
+        w = args["AA"]["weights"]
         res = income.mul(w["income"]).mul(age.mul(w["age"])).mul(dist.mul(w["dist"]))
 
         h = agents.identity["house"]

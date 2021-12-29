@@ -41,18 +41,23 @@ class Agents(object):
         args : arguments
         b : initialized building objects
         """
-        path = args.agents_dir
+        self.path = args["files"]
+        self.cols = args["cols"]
+        self.rows = args["rows"]
+        self.density = args["density"]
+        self.income = args["income"]
+        self.disease = args["disease"]
         self.device = device
-        self.identity = self._init_identity(path)
-        self.building, self.job = self._init_building_activity(path, b)
-        self.risk = self._init_risk(args, self.identity["age"])
+        self.identity = self._init_identity()
+        self.building, self.job = self._init_building_activity(b)
+        self.risk = self._init_risk(self.identity["age"])
         self.start = self._init_start_date()
         self.period = self._init_period()
         self.status = self._init_status()
 
         gc.collect()
 
-    def _init_identity(self, path):
+    def _init_identity(self):
         """
         Initialize identities.
 
@@ -67,7 +72,12 @@ class Agents(object):
         --------
         res     : dict
         """
-        data = util.load_csv(path, self.device, cols=[0, 11, 2, 6], nrows=1000)
+        data = util.load_csv(
+            self.path["agents_dir"],
+            self.device,
+            cols=self.cols["agent"],
+            nrows=self.rows["agent"],
+        )
         keys = ["id", "house", "disable", "group"]
         res = dict()
 
@@ -135,7 +145,7 @@ class Agents(object):
         del mask, house_id, house_num, is_religious
         return res
 
-    def _load_house(self, path, b):
+    def _load_house(self, b):
         """
         Initialize buildings.
 
@@ -153,7 +163,12 @@ class Agents(object):
         res = dict()
 
         res["house"] = torch.round(
-            util.load_csv(path, self.device, cols=[1], nrows=1000).view(-1)
+            util.load_csv(
+                self.path["agents_dir"],
+                self.device,
+                cols=self.cols["house"],
+                nrows=self.rows["house"],
+            ).view(-1)
         )
         self.identity["area"] = torch.zeros_like(res["house"])
         for idx in range(b.identity["idx"].shape[0]):
@@ -164,7 +179,7 @@ class Agents(object):
         del mask
         return res
 
-    def _load_employ(self, path):
+    def _load_employ(self):
         """
         Initialize employments.
 
@@ -180,7 +195,12 @@ class Agents(object):
         --------
         res     : dict
         """
-        data = util.load_csv(path, self.device, cols=[3, 12, 10], nrows=1000)
+        data = util.load_csv(
+            self.path["agents_dir"],
+            self.device,
+            cols=self.cols["employ"],
+            nrows=self.rows["employ"],
+        )
         keys = ["status", "local", "income"]
         mask = ~(self.identity["group"] == 1)
         res = dict()
@@ -204,7 +224,7 @@ class Agents(object):
         del data, keys, mask, align, houses, mask_h, mask_i, num
         return res
 
-    def _init_building_activity(self, path, buildings):
+    def _init_building_activity(self, buildings):
         """
         Initialize buildings and activities.
 
@@ -217,14 +237,16 @@ class Agents(object):
         b : dict (building)
         j : dict (jobs)
         """
-        b = self._load_house(path, buildings)
-        j = self._load_employ(path)
+        b = self._load_house(buildings)
+        j = self._load_employ()
 
         jobs = self._create_job(buildings)
         mask = j["local"] == 1
         j["job"] = self._assign_job(jobs, mask, j)
         idx = self._anchor_index(
-            self.identity["religious"], self.identity["age"], j["job"]
+            self.identity["religious"],
+            self.identity["age"],
+            j["job"],
         )
         b["anchor"] = self._assign_anchor(idx, buildings.activity, jobs)
         b["trivial"] = self._assign_trivial(idx, buildings.activity)
@@ -245,11 +267,9 @@ class Agents(object):
         res     : dict
         """
         res = dict()
-        job_density = torch.Tensor([0, 0.0004733, 0, 0.0315060, 0.0479474]).to(
-            self.device
-        )
-        avg = 7177.493  # average income
-        std = 1624.297  # standard income
+        job_density = torch.Tensor(self.density["job"]).to(self.device)
+        avg = self.income["avg"]  # average income
+        std = self.income["std"]  # standard income
 
         job_floor = b.floor["volume"][:, None] * job_density
         land_use = b.land["initial"].view(-1, 1)
@@ -430,7 +450,7 @@ class Agents(object):
         del etc, val, agents, num_a, building, num_b, random, mask
         return res
 
-    def _init_risk(self, args, age):
+    def _init_risk(self, age):
         """
         Initialize the risks.
 
@@ -444,9 +464,9 @@ class Agents(object):
         """
         res = dict()
         risks = {
-            "infection": util.load_csv(args.infection_dir, self.device),
-            "admission": util.load_csv(args.admission_dir, self.device),
-            "mortality": util.load_csv(args.mortality_dir, self.device),
+            "infection": util.load_csv(self.path["infection_dir"], self.device),
+            "admission": util.load_csv(self.path["admission_dir"], self.device),
+            "mortality": util.load_csv(self.path["mortality_dir"], self.device),
         }
         for key, val in risks.items():
             risk = torch.zeros((age.shape[0],), device=self.device)
@@ -642,8 +662,6 @@ class Agents(object):
         Return
         -------
         res : int
-
-        #TODO: does quarantine period reset after admission
         """
         a_no_admit = self.get_no_admit()
         a_uninf = (self.status == 1) | (self.status == 3)
@@ -771,8 +789,6 @@ class Agents(object):
         res1 : number of newly infected (not quarantined) agent
         res2 : number of newly infected and quarantined agent
         infection : daily infection matrix
-
-        #TODO: Shall we add a workplace or similar thematic network to detect any potential cluster?
         """
         a_qua = self.get_quarantined()
         sparse_risk = self.get_exposed_risk(routine, gamma)
@@ -825,7 +841,7 @@ class Agents(object):
         ---------
         res : int
         """
-        threshold = 7  # hyperparam
+        threshold = self.disease["diagnose"]  # hyperparam
         a_diagnosed = self.period["sick"] == threshold
         a_free = self.status == 2
         a_qua = self.status == 4
@@ -863,7 +879,7 @@ class Agents(object):
         ---------
         res : int
         """
-        threshold = 7
+        threshold = self.disease["diagnose"]
 
         a_new_diag = (self.status == 5) & (self.period["sick"] == threshold)
         idx_h = network_house[a_new_diag].long().argmax(dim=1)
@@ -881,7 +897,7 @@ class Agents(object):
         self.update_status(a_healthy, 3)
         self.update_status(a_infected, 4)
 
-        res = a_infected.count_nonzero()
+        res = a_family.count_nonzero()
 
         del (
             a_new_diag,
@@ -903,7 +919,7 @@ class Agents(object):
         -------
         res : int
         """
-        threshold = [21, 28]  # hyperparam
+        threshold = self.disease["recover"]  # hyperparam
 
         a_qua = (self.status == 5) & (self.period["sick"] == threshold[0])
         a_hos = (self.status == 6) & (self.period["sick"] == threshold[1])

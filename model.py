@@ -20,7 +20,7 @@ import dijkstra_mp64  # multiprocess shortest path
 class DySTUrbD_Epi(object):
     """Simulate the world."""
 
-    def __init__(self, args, theme, scenario, count=0):
+    def __init__(self, args, count):
         """
         Initialize the world.
 
@@ -28,8 +28,11 @@ class DySTUrbD_Epi(object):
         ---------
         args : arguments
         """
-        self.theme = theme
-        self.scenario = scenario
+        self.theme = args["theme"]
+        self.scenario = args["scenario"]
+        self.disease = args["disease"]
+        self.profile = args["profile"]
+        self.debug = args["debug"]
         self.res = {
             "Sim": count,
             "Time": {},
@@ -52,7 +55,8 @@ class DySTUrbD_Epi(object):
         print("Number of CPU:", self.cpu)
 
         self.buildings = buildings.Buildings(
-            args.buildings_dir, self.device, theme, scenario
+            args,
+            self.device,
         )
         t2 = time()
         self._log_time("Buildings", t2 - t1)
@@ -61,7 +65,7 @@ class DySTUrbD_Epi(object):
         t3 = time()
         self._log_time("Agents", t3 - t2)
 
-        self.network = networks.Networks(self.agents, self.buildings, self.device)
+        self.network = networks.Networks(args, self.agents, self.buildings, self.device)
         t4 = time()
         self._log_time("Networks", t4 - t3)
 
@@ -74,7 +78,7 @@ class DySTUrbD_Epi(object):
         t6 = time()
         self._log_time("Interaction", t6 - t5)
 
-        routine = self._get_routine(dist)
+        routine = self._get_routine(args, dist)
         self.agents.set_routine(routine)
         t7 = time()
         self._log_time("Routine", t7 - t6)
@@ -92,12 +96,12 @@ class DySTUrbD_Epi(object):
         """
         self._simulate()
 
-    def _log_time(self, key, time, DEBUG=False):
+    def _log_time(self, key, time):
         """
         Save the computational time to model.res
         """
         self.res["Time"][key] = time
-        if DEBUG:
+        if self.profile:
             print(f"{key}: {time}")
 
     def _log_stats(self, day, key, data):
@@ -181,7 +185,7 @@ class DySTUrbD_Epi(object):
 
         return res
 
-    def _get_routine(self, dist):
+    def _get_routine(self, args, dist):
         """
         Get a list of buildings visited by each agent.
 
@@ -192,8 +196,8 @@ class DySTUrbD_Epi(object):
         num_aa = self.network.AA.shape[0]  # total number of agents
         num_bb = self.network.BB.shape[0]  # total number of buildings
         idx_0 = torch.arange(num_aa)
-        dist_ab = 1  # Given distance threshold for AB network
-        dist_bb = 6  # Given distance threshold for BB network
+        dist_ab = args["distance"]["dist_ab"]  # Given distance threshold for AB network
+        dist_bb = args["distance"]["dist_bb"]  # Given distance threshold for BB network
 
         nodes_ab = dist[:num_aa, -num_bb:] < dist_ab  # a_nodes (A,B)
         nodes_bb = dist[-num_bb:, -num_bb:] < dist_bb  # all buildings (A,B,B)
@@ -226,28 +230,24 @@ class DySTUrbD_Epi(object):
                 candidates = near_start & near_end  # overlap between two buildings
                 candidates = (candidates | nodes_ab) & ~(self.network.AB["total"])
 
-                idx_candidates = candidates == True
-                candidates_weight = candidates.detach().clone().float()
-                candidates_weight[idx_candidates] = torch.randint_like(
-                    ((idx_candidates).count_nonzero(),), 5, 6, dtype=torch.float
-                )
-                candidates_weight[~idx_candidates] = torch.randint_like(
-                    ((~idx_candidates).count_nonzero(),), 5, 6, dtype=torch.float
-                )
-                idx_1 = candidates_weight.double().multinomial(
-                    1
-                )  # randomly pick one from each row
+                idx_weight = candidates == True
+                weight = candidates.detach().clone().double()
+                if args["multinomial"]["symmetry"] is True:
+                    weight[:] = 1.0
+                else:
+                    weight[idx_weight] = args["multinomial"]["asymmetry"]["possible"]
+                    weight[~idx_weight] = args["multinomial"]["asymmetry"]["impossible"]
+                idx_1 = weight.multinomial(1)  # randomly pick one from each row
                 template[idx_0, idx_1.view(-1)] = 1
                 choice = template & candidates
 
                 res |= choice  # add new building to routine (some are zeros)
 
         del (idx_0, nodes_ab, nodes_bb, dummy_bb)
-        exit()
 
         return res
 
-    def _compute_R(self, mask, today, DEBUG=False):
+    def _compute_R(self, mask, today):
         """
         Compute R value using number of new cases and expected infectious risk.
 
@@ -261,26 +261,17 @@ class DySTUrbD_Epi(object):
         res : int
         """
         sum_I = 0
-        recover = 21  # hyperparameter
+        recover = self.disease["recover"][0]  # hyperparameter
         new_inf = mask & (self.agents.start["sick"] == today)
         new_inf = new_inf.count_nonzero()
 
         for day in range(1, recover + 1):
             cnt = mask & (self.agents.period["sick"] == day)
             cnt = cnt.count_nonzero()
-            if DEBUG and today >= 8 and cnt > 0:
-                print("day", day, ":", cnt)
             contagious_strength = self.gamma.log_prob(day).to(self.device).exp()
             sum_I += cnt * contagious_strength
 
         res = new_inf / sum_I if sum_I.gt(0.0) else 0
-        if DEBUG and today >= 8:
-            print()
-            print("computer_R")
-            print("new_inf", new_inf)
-            print("sum_I", sum_I)
-            print("res", res)
-            print()
 
         return res
 
@@ -380,12 +371,13 @@ class DySTUrbD_Epi(object):
         vis_R: int if not diff else dict
         prev_vis_R: int if not diff else dict
         """
+        diagnose = self.disease["diagnose"]
         if not self.scenario["DIFF"]:
-            vis_R = self.res["Results"]["Stats"][day - 7]["R_total"]
-            prev_vis_R = self.res["Results"]["Stats"][day - 8]["R_total"]
+            vis_R = self.res["Results"]["Stats"][day - diagnose]["R_total"]
+            prev_vis_R = self.res["Results"]["Stats"][day - (diagnose + 1)]["R_total"]
         else:
-            vis_R = self.res["Results"]["SAs"][day - 7]
-            prev_vis_R = self.res["Results"]["SAs"][day - 8]
+            vis_R = self.res["Results"]["SAs"][day - diagnose]
+            prev_vis_R = self.res["Results"]["SAs"][day - (diagnose + 1)]
 
         return vis_R, prev_vis_R
 
@@ -457,9 +449,7 @@ class DySTUrbD_Epi(object):
             t10 = time()
             self._log_time("Update Recovery", t10 - t9)
 
-            R_total = self._compute_R(
-                torch.ones_like(self.agents.status).bool(), day, DEBUG=True
-            )
+            R_total = self._compute_R(torch.ones_like(self.agents.status).bool(), day)
             t11 = time()
             self._log_time("Compute overall R", t11 - t10)
 
@@ -475,7 +465,7 @@ class DySTUrbD_Epi(object):
             t14 = time()
             self._log_time("Compute IO matrix", t14 - t13)
 
-            if day > 9:
+            if day > self.disease["diagnose"] + 2:
                 vis_R, prev_vis_R = self._get_vis_R(day)
                 self.buildings.update_lockdown(vis_R, prev_vis_R)
                 t15 = time()
@@ -519,21 +509,27 @@ class DySTUrbD_Epi(object):
             self._log_stats(day, "Daily Deaths", new_death)
             self._log_stats(day, "R_total", R_total)
             self._log_stats(day, "Closed Buildings", num_closed)
-            self._log_stats(day, "Susceptible Agents:", num_susceptible)
+            self._log_stats(day, "Susceptible Agents", num_susceptible)
 
             print()
             print("DEBUG")
-            print("Status-1:", (self.agents.status == 1).count_nonzero())
-            print("Status-2:", (self.agents.status == 2).count_nonzero())
-            print("Status-3:", (self.agents.status == 3).count_nonzero())
-            print("Status-4:", (self.agents.status == 4).count_nonzero())
-            print("Status-5:", (self.agents.status == 5).count_nonzero())
-            print("Status-6:", (self.agents.status == 6).count_nonzero())
-            print("Status-7:", (self.agents.status == 7).count_nonzero())
-            print("Status-8:", (self.agents.status == 8).count_nonzero())
+            print("Susceptible:", (self.agents.status == 1).count_nonzero())
+            print("Infected:", (self.agents.status == 2).count_nonzero())
+            print("Qurantine, Susceptible:", (self.agents.status == 3).count_nonzero())
+            print(
+                "Qurantine, Infected, Undiagnosed:",
+                (self.agents.status == 4).count_nonzero(),
+            )
+            print(
+                "Quarantine, Infected, Diagnosed:",
+                (self.agents.status == 5).count_nonzero(),
+            )
+            print("Hospitalized:", (self.agents.status == 6).count_nonzero())
+            print("Recovered:", (self.agents.status == 7).count_nonzero())
+            print("Dead", (self.agents.status == 8).count_nonzero())
             print()
 
-            # if day == 25:
+            # if day == 30:
             #     break
             day += 1
             del (

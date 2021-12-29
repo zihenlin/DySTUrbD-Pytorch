@@ -29,7 +29,7 @@ class Buildings(object):
     status              : open or close
     """
 
-    def __init__(self, path, device, theme, scenario):
+    def __init__(self, args, device):
         """
         Initialize buildings.
 
@@ -48,14 +48,15 @@ class Buildings(object):
 
         Parameters
         ----------
-        path : str
+        args : dict
         device : str
-        theme : dict
-        scenario : dict
         """
         self.device = device
         data = util.load_csv(
-            path, self.device, cols=[6, 2, 3, 12, 4, 2, 14, 15, 17, 18], nrows=1200
+            args["files"]["buildings_dir"],
+            self.device,
+            cols=args["cols"]["building"],
+            nrows=args["rows"]["building"],
         )
         self.identity = {
             "idx": torch.arange(data.shape[0], device=self.device),
@@ -65,26 +66,15 @@ class Buildings(object):
             "Y": data[:, 7],
         }
 
-        self.usg_dict = {
-            "school0": [5305],
-            "school1": [5310],
-            "school2": [5338],
-            "schoolR0": [5300],
-            "schoolR1": [5312],
-            "schoolR2": [5523, 5525],
-            "schoolR3": [5340],
-            "etc": [6512, 6520, 6530, 6600, 5740, 5760, 5600, 5700, 5202, 5253],
-            "religious": [5501, 5521],
-        }
-
+        self.usg_dict = args["usg"]
         self.usg = {"broad": data[:, 8], "specific": data[:, 9]}
         self.land = {"initial": data[:, 5], "current": data[:, 1]}
         self.floor = {"number": data[:, 2], "volume": data[:, 4]}
         self.status = torch.ones((data.shape[0],), device=self.device, dtype=torch.bool)
         self.activity = self._create_activity()
-        self.theme = theme
-        self.theme_mask = self.get_thematic_mask()
-        self.scenario = scenario
+        self.theme = args["theme"]
+        self.theme_mask = self.get_thematic_mask(args)
+        self.scenario = args["scenario"]
         gc.collect()
 
     def _get_SA_idx(self, data):
@@ -198,14 +188,11 @@ class Buildings(object):
             self.theme["ALL"] and (self.theme["EDU"] or self.theme["REL"])
         ), "Theme conflict"
 
-        res = (
-            torch.zeros_like(self.status)
-            if not self.theme["ALL"]
-            else torch.ones_like(self.status)
-            if not gradual
-            else torch.randint_like(self.status, 0, 2)
-        )
+        res = torch.zeros_like(self.status)
         # ALL
+        if self.theme["ALL"]:
+            all_mask = self.land["current"] >= 3  # non-residential
+            res |= all_mask
 
         if self.theme["EDU"]:
             edu_usg = [
@@ -215,21 +202,17 @@ class Buildings(object):
             ]
             edu_mask = self.groupby_USG_or_SA(edu_usg, "USG")
             res |= edu_mask
-            if gradual:
-                idx = edu_mask.nonzero()
-                res[idx] = torch.randint(
-                    0, 2, (idx.shape[0], 1), dtype=torch.bool, device=self.device
-                )
 
         if self.theme["REL"]:
             rel_usg = self.usg_dict["religious"]
             rel_mask = self.groupby_USG_or_SA(rel_usg, "USG")
             res |= rel_mask
-            if gradual:
-                idx = rel_mask.nonzero()
-                res[idx] = torch.randint(
-                    0, 2, (idx.shape[0], 1), dtype=torch.bool, device=self.device
-                )
+
+        if gradual:
+            idx = res.nonzero()
+            res[idx] = torch.randint(
+                0, 2, (idx.shape[0], 1), dtype=torch.bool, device=self.device
+            )
 
         return res
 
