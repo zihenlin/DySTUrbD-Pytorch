@@ -690,7 +690,7 @@ class Agents(object):
         status : int
         """
         if mask.count_nonzero() != 0:
-            self.status[mask] = status
+            self.status[mask.bool()] = status
 
     def update_start(self, mask, key, day):
         """
@@ -702,7 +702,7 @@ class Agents(object):
         key : string
         day : int
         """
-        self.start[key][mask] = day
+        self.start[key][mask.bool()] = day
 
     def update_death(self):
         """
@@ -886,18 +886,19 @@ class Agents(object):
         h_to_a = network_house.t()
 
         idx_family = h_to_a[idx_h].nonzero(as_tuple=True)[1]
-        a_family = torch.zeros_like(self.status).long()
-        a_family[idx_family] = 1
+        a_family = torch.zeros_like(self.status).bool()
+        a_family[idx_family] = True
         a_family &= ~a_new_diag
 
         a_healthy = a_family & (self.status == 1)
         a_infected = a_family & (self.status == 2)
+        a_qua = a_healthy & a_infected
 
         self.update_start(a_family, "quarantine", day)
         self.update_status(a_healthy, 3)
         self.update_status(a_infected, 4)
 
-        res = a_family.count_nonzero()
+        res = a_qua.count_nonzero()
 
         del (
             a_new_diag,
