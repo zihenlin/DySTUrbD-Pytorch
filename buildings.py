@@ -52,11 +52,12 @@ class Buildings(object):
         device : str
         """
         self.device = device
-        data = util.load_csv(
+        data = util.load_data(
             args["files"]["buildings_dir"],
             self.device,
             cols=args["cols"]["building"],
             nrows=args["rows"]["building"],
+            skiprows=1,
         )
         self.identity = {
             "idx": torch.arange(data.shape[0], device=self.device),

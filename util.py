@@ -107,7 +107,7 @@ import torch
 #     return load_csv(infection), load_csv(admission), load_csv(mortality)
 
 
-def load_csv(csvFile, device, cols=None, preprocess=None, nrows=None):
+def load_data(File, device, cols=None, preprocess=None, nrows=None, skiprows=None):
     """
     This function loads data from given csv path.
     Params  : csvFile (str), cols (list)
@@ -115,19 +115,24 @@ def load_csv(csvFile, device, cols=None, preprocess=None, nrows=None):
     Fail    : Raise exception and halt
     """
     try:
-        if nrows is None:
-            csvData = pd.read_csv(csvFile, header=None, usecols=cols)
-        else:
-            csvData = pd.read_csv(csvFile, header=None, usecols=cols, nrows=nrows)
+        if ".csv" in File:
+            data = pd.read_csv(
+                File, header=None, usecols=cols, nrows=nrows, skiprows=skiprows
+            )
+        elif ".xlsx" in File or ".xls" in File:
+            data = pd.read_excel(
+                File, header=None, usecols=cols, nrows=nrows, skiprows=skiprows
+            )
         if cols is not None:
-            csvData = csvData[cols]  # Preserve positional order
+            data = data[cols]  # Preserve positional order
         if preprocess is not None:
-            csvData = preprocess(csvData)  # Preprocess data
+            data = preprocess(data)  # Preprocess data
     except Exception as e:
-        print("Unable to load data ", csvFile, ":", e)
+        print("Unable to load data ", File, ":", e)
         raise
     try:
-        return torch.Tensor(csvData.to_numpy()).to(device)
+        data = data.fillna(0)
+        return torch.Tensor(data.to_numpy()).to(device)
     except Exception as e:
         print("Unable to proceed: ", e)
         raise

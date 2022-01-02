@@ -72,11 +72,12 @@ class Agents(object):
         --------
         res     : dict
         """
-        data = util.load_csv(
+        data = util.load_data(
             self.path["agents_dir"],
             self.device,
             cols=self.cols["agent"],
             nrows=self.rows["agent"],
+            skiprows=1,
         )
         keys = ["id", "house", "disable", "group"]
         res = dict()
@@ -163,11 +164,12 @@ class Agents(object):
         res = dict()
 
         res["house"] = torch.round(
-            util.load_csv(
+            util.load_data(
                 self.path["agents_dir"],
                 self.device,
                 cols=self.cols["house"],
                 nrows=self.rows["house"],
+                skiprows=1,
             ).view(-1)
         )
         self.identity["area"] = torch.zeros_like(res["house"])
@@ -195,11 +197,12 @@ class Agents(object):
         --------
         res     : dict
         """
-        data = util.load_csv(
+        data = util.load_data(
             self.path["agents_dir"],
             self.device,
             cols=self.cols["employ"],
             nrows=self.rows["employ"],
+            skiprows=1,
         )
         keys = ["status", "local", "income"]
         mask = ~(self.identity["group"] == 1)
@@ -464,9 +467,9 @@ class Agents(object):
         """
         res = dict()
         risks = {
-            "infection": util.load_csv(self.path["infection_dir"], self.device),
-            "admission": util.load_csv(self.path["admission_dir"], self.device),
-            "mortality": util.load_csv(self.path["mortality_dir"], self.device),
+            "infection": util.load_data(self.path["infection_dir"], self.device),
+            "admission": util.load_data(self.path["admission_dir"], self.device),
+            "mortality": util.load_data(self.path["mortality_dir"], self.device),
         }
         for key, val in risks.items():
             risk = torch.zeros((age.shape[0],), device=self.device)
