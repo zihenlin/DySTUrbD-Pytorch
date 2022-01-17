@@ -8,8 +8,12 @@ ticks: 1
 
 files:
   out_dir: "./outputs/"
-  agents_dir: "./data/beer-sheva/agents.csv"
-  buildings_dir: "./data/beer-sheva/buildings.xlsx"
+  # Jerusalem
+  agents_dir: "./data/agents.csv"
+  buildings_dir: "./data/buildings.xlsx"
+  # Beer-sheva
+  # agents_dir: "./data/beer-sheva/agents.csv"
+  # buildings_dir: "./data/beer-sheva/buildings.xlsx"
   infection_dir: "./data/infection_prob.csv"
   admission_dir: "./data/admission_prob.csv"
   mortality_dir: "./data/mortality_prob.csv"
@@ -20,15 +24,15 @@ debug: True
 # Columns to read
 cols:
   # Jerusalem
-  # agent: [0, 11, 2, 6]
-  # house: [1]
-  # employ: [3, 12, 10]
-  # building: [6, 2, 3, 12, 4, 2, 14, 15, 17, 18]
+  agent: [0, 11, 2, 6]
+  house: [1]
+  employ: [3, 12, 10]
+  building: [6, 2, 3, 12, 4, 2, 14, 15, 17, 18]
   # Beer-sheva
-  agent: [0, 1, 3, 2]
-  house: [9]
-  employ: [4, 6, 7]
-  building: [0, 1, 6, 2, 5, 1, 3, 4, 13, 14]
+  # agent: [0, 1, 3, 2]
+  # house: [9]
+  # employ: [4, 6, 7]
+  # building: [0, 1, 6, 2, 5, 1, 3, 4, 13, 14]
 
 # Data size
 # Put null for full data size
@@ -100,9 +104,9 @@ AA:
 
 density:
   # Jerusalem
-  # job: [0, 0.0004733, 0, 0.0315060, 0.0479474]
+  job: [0, 0.0004733, 0, 0.0315060, 0.0479474]
   # Beer-sheva
-  job: [0, 0.0000189, 0, 0.0139521258, 0.010595212, 0.002325367]
+  # job: [0, 0.0000189, 0, 0.0139521258, 0.010595212, 0.002325367]
 
 income:
   avg: 7177.493

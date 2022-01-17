@@ -9,7 +9,9 @@ import torch
 from scipy.sparse import csr_matrix
 import psutil  # get number of CPU cores
 from time import time
+import json
 import gc
+from datetime import datetime
 
 import buildings
 import agents
@@ -33,6 +35,7 @@ class DySTUrbD_Epi(object):
         self.disease = args["disease"]
         self.profile = args["profile"]
         self.debug = args["debug"]
+        self.count = count
         self.res = {
             "Sim": count,
             "Time": {},
@@ -554,3 +557,21 @@ class DySTUrbD_Epi(object):
             )
             gc.collect()
             torch.cuda.empty_cache()
+        name = ""
+        for key, val in self.theme.items():
+            if val is True:
+                name += key + "_"
+        for key, val in self.scenario.items():
+            if val is True:
+                name += key + "_"
+        with open(
+            "outputs/sim"
+            + str(self.count)
+            + "_"
+            + name
+            + datetime.now().strftime("%x")
+            + datetime.now().strftime("%X")
+            + ".json",
+            "w",
+        ) as outfile:
+            json.dump(self.res, outfile)
