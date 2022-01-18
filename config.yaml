@@ -10,7 +10,7 @@ files:
   out_dir: "./outputs/"
   # Jerusalem
   agents_dir: "./data/agents.csv"
-  buildings_dir: "./data/buildings.xlsx"
+  buildings_dir: "./data/buildings.csv"
   # Beer-sheva
   # agents_dir: "./data/beer-sheva/agents.csv"
   # buildings_dir: "./data/beer-sheva/buildings.xlsx"
@@ -19,7 +19,7 @@ files:
   mortality_dir: "./data/mortality_prob.csv"
 
 profile: False
-debug: True
+debug: False
 
 # Columns to read
 cols:
@@ -37,10 +37,10 @@ cols:
 # Data size
 # Put null for full data size
 rows:
-  agent: 1000
-  house: 1000
-  employ: 1000
-  building: 1200
+  agent: null
+  house: null
+  employ: null
+  building: null
 
 # USG for Jerusalem
 usg:

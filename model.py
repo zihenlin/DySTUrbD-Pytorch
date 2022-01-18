@@ -35,6 +35,7 @@ class DySTUrbD_Epi(object):
         self.disease = args["disease"]
         self.profile = args["profile"]
         self.debug = args["debug"]
+        self.out_dir = args["files"]["out_dir"]
         self.count = count
         self.res = {
             "Sim": count,
@@ -565,13 +566,20 @@ class DySTUrbD_Epi(object):
             if val is True:
                 name += key + "_"
         with open(
-            "outputs/sim"
+            self.out_dir
+            + "sim_"
             + str(self.count)
             + "_"
             + name
-            + datetime.now().strftime("%x")
-            + datetime.now().strftime("%X")
+            + datetime.now().strftime("%d")
+            + datetime.now().strftime("%m")
+            + datetime.now().strftime("%Y")
+            + "_"
+            + datetime.now().strftime("%H")
+            + datetime.now().strftime("%M")
             + ".json",
             "w",
         ) as outfile:
             json.dump(self.res, outfile)
+
+        print("Total time:", self.time - time())

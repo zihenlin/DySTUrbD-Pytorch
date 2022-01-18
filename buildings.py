@@ -215,6 +215,8 @@ class Buildings(object):
                 0, 2, (idx.shape[0], 1), dtype=torch.bool, device=self.device
             )
 
+        if res.count_nonzero() == 0:
+            res = torch.ones_like(self.status)
         return res
 
     def update_lockdown(self, vis_R, prev_vis_R):
