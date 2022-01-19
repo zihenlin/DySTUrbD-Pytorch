@@ -12,6 +12,7 @@ from time import time
 import json
 import gc
 from datetime import datetime
+import os
 
 import buildings
 import agents
@@ -38,15 +39,14 @@ class DySTUrbD_Epi(object):
         self.out_dir = args["files"]["out_dir"]
         self.count = count
         self.res = {
-            "Sim": count,
-            "Time": {},
             "Results": {
+                "Time": {},
                 "Stats": {},
-                "Buildings": {},
                 "SAs": {},
-                "IO_mat": {},
-                "daily_infection": [],
             },
+            "Buildings": {},
+            "IO_mat": {},
+            "daily_infection": {},
         }
         self.time = time()
         print("Init start!")
@@ -104,7 +104,7 @@ class DySTUrbD_Epi(object):
         """
         Save the computational time to model.res
         """
-        self.res["Time"][key] = time
+        self.res["Results"]["Time"][key] = time
         if self.profile:
             print(f"{key}: {time}")
 
@@ -275,7 +275,7 @@ class DySTUrbD_Epi(object):
             contagious_strength = self.gamma.log_prob(day).to(self.device).exp()
             sum_I += cnt * contagious_strength
 
-        res = new_inf / sum_I if sum_I.gt(0.0) else 0
+        res = (new_inf / sum_I).item() if sum_I.gt(0.0) else 0
 
         return res
 
@@ -297,7 +297,7 @@ class DySTUrbD_Epi(object):
 
         for sa in sas:
             sa_a = self.agents.identity["area"] == sa
-            res[sa] = self._compute_R(sa_a, day)
+            res[sa.item()] = self._compute_R(sa_a, day)
 
         del sas
         return res
@@ -323,9 +323,14 @@ class DySTUrbD_Epi(object):
 
         total = ab_house.sum(0)
         inf = inf_house.sum(0)
+        ratio = torch.zeros_like(total, dtype=torch.float)
+
+        if total.count_nonzero() != 0:
+            idx = total.nonzero()
+            ratio[idx] = inf[idx].div(total[idx])
 
         del ab_house, a_inf, inf_house
-        return inf, inf.div(total.view(-1, 1))
+        return inf, ratio
 
     def _get_IO_mat(self, inf_mat):
         """
@@ -494,47 +499,50 @@ class DySTUrbD_Epi(object):
             Logging data to output
             """
             self.res["Results"]["SAs"][day] = R_sa
-            self.res["Results"]["Buildings"][day] = {}
-            self.res["Results"]["Buildings"][day]["inf"] = b_inf.tolist()
-            self.res["Results"]["Buildings"][day]["ratio"] = b_ratio.tolist()
-            self.res["Results"]["IO_mat"][day] = io_mat
-            self.res["Results"]["daily_infection"].append(inf_mat.nonzero())
             self.res["Results"]["Stats"][day] = {}
-            self._log_stats(day, "Total Infections", total_inf)
-            self._log_stats(day, "Active Infections", num_inf)
-            self._log_stats(day, "Daily Infections", new_inf)
-            self._log_stats(day, "Total Recovered", num_recovered)
-            self._log_stats(day, "Daily Recovered", new_recovered)
-            self._log_stats(day, "Total Quarantined", num_qua)
-            self._log_stats(day, "Daily Quarantined", new_qua)
-            self._log_stats(day, "Total Hospitalized", num_admission)
-            self._log_stats(day, "Daily Hospitalized", new_admission)
-            self._log_stats(day, "Total Deaths", num_death)
-            self._log_stats(day, "Daily Deaths", new_death)
+            self._log_stats(day, "Total Infections", total_inf.item())
+            self._log_stats(day, "Active Infections", num_inf.item())
+            self._log_stats(day, "Daily Infections", new_inf.item())
+            self._log_stats(day, "Total Recovered", num_recovered.item())
+            self._log_stats(day, "Daily Recovered", new_recovered.item())
+            self._log_stats(day, "Total Quarantined", num_qua.item())
+            self._log_stats(day, "Daily Quarantined", new_qua.item())
+            self._log_stats(day, "Total Hospitalized", num_admission.item())
+            self._log_stats(day, "Daily Hospitalized", new_admission.item())
+            self._log_stats(day, "Total Deaths", num_death.item())
+            self._log_stats(day, "Daily Deaths", new_death.item())
             self._log_stats(day, "R_total", R_total)
-            self._log_stats(day, "Closed Buildings", num_closed)
-            self._log_stats(day, "Susceptible Agents", num_susceptible)
+            self._log_stats(day, "Closed Buildings", num_closed.item())
+            self._log_stats(day, "Susceptible Agents", num_susceptible.item())
 
-            print()
-            print("DEBUG")
-            print("Susceptible:", (self.agents.status == 1).count_nonzero())
-            print("Infected:", (self.agents.status == 2).count_nonzero())
-            print("Qurantine, Susceptible:", (self.agents.status == 3).count_nonzero())
-            print(
-                "Qurantine, Infected, Undiagnosed:",
-                (self.agents.status == 4).count_nonzero(),
-            )
-            print(
-                "Quarantine, Infected, Diagnosed:",
-                (self.agents.status == 5).count_nonzero(),
-            )
-            print("Hospitalized:", (self.agents.status == 6).count_nonzero())
-            print("Recovered:", (self.agents.status == 7).count_nonzero())
-            print("Dead", (self.agents.status == 8).count_nonzero())
-            print()
+            self.res["Buildings"][day] = {}
+            self.res["Buildings"][day]["inf"] = b_inf.tolist()
+            self.res["Buildings"][day]["ratio"] = b_ratio.tolist()
+            self.res["IO_mat"][day] = io_mat.tolist()
+            self.res["daily_infection"][day] = inf_mat.nonzero().tolist()
+            if self.debug:
+                print()
+                print("DEBUG")
+                print("Susceptible:", (self.agents.status == 1).count_nonzero())
+                print("Infected:", (self.agents.status == 2).count_nonzero())
+                print(
+                    "Qurantine, Susceptible:", (self.agents.status == 3).count_nonzero()
+                )
+                print(
+                    "Qurantine, Infected, Undiagnosed:",
+                    (self.agents.status == 4).count_nonzero(),
+                )
+                print(
+                    "Quarantine, Infected, Diagnosed:",
+                    (self.agents.status == 5).count_nonzero(),
+                )
+                print("Hospitalized:", (self.agents.status == 6).count_nonzero())
+                print("Recovered:", (self.agents.status == 7).count_nonzero())
+                print("Dead", (self.agents.status == 8).count_nonzero())
+                print()
 
-            # if day == 30:
-            #     break
+            if day == 10:
+                break
             day += 1
             del (
                 num_admission,
@@ -558,6 +566,17 @@ class DySTUrbD_Epi(object):
             )
             gc.collect()
             torch.cuda.empty_cache()
+
+        self.output()
+
+        print()
+        print("SIMULATION tick", self.count, "COMPLETE!")
+        print("Total time:", time() - self.time)
+        print()
+
+    def output(self):
+        print()
+        print("Writing to files....")
         name = ""
         for key, val in self.theme.items():
             if val is True:
@@ -565,7 +584,7 @@ class DySTUrbD_Epi(object):
         for key, val in self.scenario.items():
             if val is True:
                 name += key + "_"
-        with open(
+        path = (
             self.out_dir
             + "sim_"
             + str(self.count)
@@ -577,9 +596,42 @@ class DySTUrbD_Epi(object):
             + "_"
             + datetime.now().strftime("%H")
             + datetime.now().strftime("%M")
-            + ".json",
+        )
+        os.mkdir(path)
+        with open(
+            path + "/" + "results" + ".json",
             "w",
         ) as outfile:
-            json.dump(self.res, outfile)
+            json.dump(self.res["Results"], outfile)
+        print("results.json")
 
-        print("Total time:", self.time - time())
+        with open(
+            path + "/" + "buildings" + ".json",
+            "w",
+        ) as outfile:
+            json.dump(self.res["Buildings"], outfile)
+        print("buildings.json")
+
+        with open(
+            path + "/" + "io_mat" + ".json",
+            "w",
+        ) as outfile:
+            json.dump(self.res["IO_mat"], outfile)
+        print("io_mat.json")
+
+        with open(
+            path + "/" + "daily_infection" + ".json",
+            "w",
+        ) as outfile:
+            json.dump(self.res["daily_infection"], outfile)
+        print("daily_infection.json")
+
+        print("Done.")
+
+
+def myprint(d):
+    for k, v in d.items():
+        if isinstance(v, dict):
+            myprint(v)
+        else:
+            print("{0}{1}:{2}".format(k, type(k), type(v)))
