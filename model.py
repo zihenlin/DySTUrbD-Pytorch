@@ -54,9 +54,9 @@ class DySTUrbD_Epi(object):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Current Device:", self.device)
 
-        self.cpu = len(psutil.Process().cpu_affinity())
+        # self.cpu = len(psutil.Process().cpu_affinity())
         t1 = time()
-        print("Number of CPU:", self.cpu)
+        # print("Number of CPU:", self.cpu)
 
         self.buildings = buildings.Buildings(
             args,

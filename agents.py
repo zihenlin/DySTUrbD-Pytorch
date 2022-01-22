@@ -77,7 +77,7 @@ class Agents(object):
             self.device,
             cols=self.cols["agent"],
             nrows=self.rows["agent"],
-            skiprows=1,
+            # skiprows=1,
         )
         keys = ["id", "house", "disable", "group"]
         res = dict()
@@ -169,7 +169,7 @@ class Agents(object):
                 self.device,
                 cols=self.cols["house"],
                 nrows=self.rows["house"],
-                skiprows=1,
+                # skiprows=1,
             ).view(-1)
         )
         self.identity["area"] = torch.zeros_like(res["house"])
@@ -202,7 +202,7 @@ class Agents(object):
             self.device,
             cols=self.cols["employ"],
             nrows=self.rows["employ"],
-            skiprows=1,
+            # skiprows=1,
         )
         keys = ["status", "local", "income"]
         mask = ~(self.identity["group"] == 1)

@@ -9,6 +9,7 @@ The attributes with specific values are annotated.
 import itertools  # to flatten nested list
 import torch
 import gc
+import torch.nn.functional as F
 
 import util
 
@@ -57,7 +58,7 @@ class Buildings(object):
             self.device,
             cols=args["cols"]["building"],
             nrows=args["rows"]["building"],
-            skiprows=1,
+            # skiprows=1,
         )
         self.identity = {
             "idx": torch.arange(data.shape[0], device=self.device),
@@ -74,8 +75,8 @@ class Buildings(object):
         self.status = torch.ones((data.shape[0],), device=self.device, dtype=torch.bool)
         self.activity = self._create_activity()
         self.theme = args["theme"]
-        self.theme_mask = self.get_thematic_mask(args)
         self.scenario = args["scenario"]
+        self.theme_mask = self.get_thematic_mask()
         gc.collect()
 
     def _get_SA_idx(self, data):
@@ -166,7 +167,7 @@ class Buildings(object):
 
         return res
 
-    def get_thematic_mask(self, gradual=False):
+    def get_thematic_mask(self):
         """
         Return a building mask according pre-configured lockdown setting
 
@@ -209,14 +210,6 @@ class Buildings(object):
             rel_mask = self.groupby_USG_or_SA(rel_usg, "USG")
             res |= rel_mask
 
-        if gradual:
-            idx = res.nonzero()
-            res[idx] = torch.randint(
-                0, 2, (idx.shape[0], 1), dtype=torch.bool, device=self.device
-            )
-
-        if res.count_nonzero() == 0:
-            res = torch.ones_like(self.status)
         return res
 
     def update_lockdown(self, vis_R, prev_vis_R):
@@ -244,8 +237,12 @@ class Buildings(object):
             if self.scenario["GRADUAL"]:
                 if 1 < vis_R[idx] < 2:
                     if ~(1 < prev_vis_R[idx] < 2):
-                        theme_mask = self.get_thematic_mask(gradual=True)
-                        res[b_mask[idx] & theme_mask] = 0
+                        res[b_mask[idx] & self.theme_mask] = 0
+                        idx = res.nonzero()
+                        rand_idx = torch.randperm(
+                            int(idx.shape[0] / 2)
+                        )  # get random idx for 0
+                        res[idx[rand_idx]] = 0
                     else:
                         res = self.status
                 elif vis_R[idx] >= 2:
