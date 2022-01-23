@@ -652,7 +652,9 @@ class Agents(object):
         """
         Reset period of agents.
         """
-        self.period[key][mask] = 0
+
+        if mask.count_nonzero() != 0:
+            self.period[key][mask.bool()] = 0
 
     def update_admission(self, day):
         """
@@ -705,7 +707,8 @@ class Agents(object):
         key : string
         day : int
         """
-        self.start[key][mask.bool()] = day
+        if mask.count_nonzero() != 0:
+            self.start[key][mask.bool()] = day
 
     def update_death(self):
         """
@@ -805,7 +808,7 @@ class Agents(object):
 
         self.update_status(inf_no_qua, 2)
         self.update_start(inf_no_qua, "sick", day)
-        self.update_status(inf_qua, 5)
+        self.update_status(inf_qua, 4)
         self.update_start(inf_qua, "sick", day)
 
         res1 = inf_reduced.count_nonzero()
