@@ -935,6 +935,8 @@ class Agents(object):
         self.update_start(a_qua, "quarantine", 0)
         self.reset_period(a_hos, "admission")
         self.update_start(a_hos, "admission", 0)
+        self.reset_period(a_hos | a_qua, "sick")
+        self.update_start(a_hos | a_qua, "sick", 0)
 
         res = (a_qua | a_hos).count_nonzero()
 
