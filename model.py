@@ -434,7 +434,7 @@ class DySTUrbD_Epi(object):
             t5 = time()
             self._log_time("Update Death", t5 - t4)
 
-            new_inf, new_qua, inf_mat = self.agents.update_infection(
+            new_inf, inf_mat = self.agents.update_infection(
                 day, routine.detach().clone(), self.gamma
             )
             t6 = time()
@@ -444,7 +444,7 @@ class DySTUrbD_Epi(object):
             t7 = time()
             self._log_time("End Quarantine", t7 - t6)
 
-            new_qua += self.agents.update_diagnosis(day)
+            new_qua = self.agents.update_diagnosis(day)
             t8 = time()
             self._log_time("Update Diagnosis", t8 - t7)
 
@@ -541,7 +541,8 @@ class DySTUrbD_Epi(object):
                 print("Dead", (self.agents.status == 8).count_nonzero())
                 print()
 
-            if day == 10:
+            if day == 50:
+                exit()
                 break
             day += 1
             del (

@@ -37,10 +37,10 @@ cols:
 # Data size
 # Put null for full data size
 rows:
-  agent: null
-  house: null
-  employ: null
-  building: null
+  agent: 1000
+  house: 1000
+  employ: 1000
+  building: 1200
 
 # USG for Jerusalem
 usg:

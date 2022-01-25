@@ -811,12 +811,11 @@ class Agents(object):
         self.update_status(inf_qua, 4)
         self.update_start(inf_qua, "sick", day)
 
-        res1 = inf_reduced.count_nonzero()
-        res2 = inf_qua.count_nonzero()
+        res = inf_reduced.count_nonzero()
 
         del a_qua, sparse_risk, rand_threshold, inf_reduced, inf_qua, inf_no_qua
 
-        return res1, res2, infection
+        return res, infection
 
     def end_quarantine(self):
         """
@@ -898,7 +897,7 @@ class Agents(object):
 
         a_healthy = a_family & (self.status == 1)
         a_infected = a_family & (self.status == 2)
-        a_qua = a_healthy & a_infected
+        a_qua = a_healthy | a_infected
 
         self.update_start(a_family, "quarantine", day)
         self.update_status(a_healthy, 3)
