@@ -7,8 +7,9 @@ While the remaining will be randomly initialized.
 For the details of the attribute, please refer to readme.
 """
 
-import torch
 import gc
+
+import torch
 
 import util
 
@@ -244,8 +245,7 @@ class Agents(object):
         j = self._load_employ()
 
         jobs = self._create_job(buildings)
-        mask = j["local"] == 1
-        j["job"] = self._assign_job(jobs, mask, j)
+        j["job"] = self._assign_job(jobs, j)
         idx = self._anchor_index(
             self.identity["religious"],
             self.identity["age"],
@@ -254,7 +254,7 @@ class Agents(object):
         b["anchor"] = self._assign_anchor(idx, buildings.activity, jobs)
         b["trivial"] = self._assign_trivial(idx, buildings.activity)
 
-        del jobs, mask, idx
+        del jobs, idx
         return b, j
 
     def _create_job(self, b):
@@ -281,12 +281,13 @@ class Agents(object):
         job_num = torch.round(job_num).int()
         total = torch.sum(job_num).item()
 
-        res["income"] = torch.zeros((total,), device=self.device)
-        res["building"] = torch.zeros((total,), device=self.device, dtype=torch.int64)
+        res["income"] = -torch.ones((total,), device=self.device)
+        res["building"] = -torch.ones((total,), device=self.device, dtype=torch.int64)
         res["vacant"] = torch.ones((total,), device=self.device)
         res["id"] = torch.arange(total, device=self.device, dtype=torch.int64) + 1
 
         cnt = 0
+
         for idx, val in enumerate(job_num):
             if val.item() == 0:
                 continue
@@ -301,14 +302,13 @@ class Agents(object):
         del (job_density, job_floor, land_use, job_num, total, cnt)
         return res
 
-    def _assign_job(self, jobs, mask, j):
+    def _assign_job(self, jobs, j):
         """
         Assign created jobs to agents.
 
         Parameter
         ---------
         jobs    : dict
-        mask    : torch.Tensor
         j       : dict (agent)
 
         Return
@@ -316,11 +316,12 @@ class Agents(object):
         res     : torch.Tensor
         """
         num_j = jobs["id"].shape[0]  # number of jobs
+        mask = j['local'] == 1
         num_a = mask.count_nonzero()  # number of agents
-        idx_a = torch.nonzero(mask)
+        idx_a = torch.nonzero(mask).view(-1)
         limit = num_j if num_j < num_a else num_a
         random = torch.randperm(num_a, device=self.device)
-        res = torch.zeros((mask.shape[0],), device=self.device, dtype=torch.int64)
+        res = -torch.ones((mask.shape[0],), device=self.device, dtype=torch.int64)
 
         while limit > 0:
             idx_j = torch.nonzero(jobs["vacant"])  # index of vacancies
@@ -333,7 +334,7 @@ class Agents(object):
             limit -= 1
 
         # remove jobless agent from work force
-        idx_a = torch.nonzero(mask)
+        idx_a = torch.nonzero(mask).view(-1)
         j["status"][idx_a] = 0
         j["local"][idx_a] = 0
 
@@ -390,8 +391,8 @@ class Agents(object):
         ---------
         res     : torch.Tensor
         """
-        res = torch.zeros((idx["job"].shape[0],), dtype=torch.int64, device=self.device)
-        has_job = torch.nonzero(idx["job"])
+        res = -torch.ones((idx["job"].shape[0],), dtype=torch.int64, device=self.device)
+        has_job = torch.nonzero(idx["job"] != -1).view(-1)
 
         for agent in has_job:
             mask = jobs["id"] == idx["job"][agent]
@@ -404,7 +405,7 @@ class Agents(object):
 
         for key in anchor:
 
-            val = (res == 0) & idx[key] if "etc" in key else idx[key]
+            val = (res == -1) & idx[key] if "etc" in key else idx[key]
             agents = torch.nonzero(val).view(-1)
             num_a = agents.shape[0]
             building = a[key]
@@ -435,7 +436,8 @@ class Agents(object):
         ---------
         res     : torch.Tensor
         """
-        res = torch.zeros((idx["job"].shape[0],), dtype=torch.int64, device=self.device)
+        res = torch.ones((idx["job"].shape[0],), dtype=torch.int64, device=self.device)
+        res = -res
         etc = [x for x in idx.keys() if "etc" in x]
         for key in etc:
             val = idx[key]
