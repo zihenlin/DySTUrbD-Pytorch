@@ -18,6 +18,7 @@ import buildings
 import agents
 import networks
 import dijkstra_mp64  # multiprocess shortest path
+import sparse_dijkstra_mp64
 
 
 class DySTUrbD_Epi(object):
@@ -39,11 +40,7 @@ class DySTUrbD_Epi(object):
         self.out_dir = args["files"]["out_dir"]
         self.count = count
         self.res = {
-            "Results": {
-                "Time": {},
-                "Stats": {},
-                "SAs": {},
-            },
+            "Results": {"Time": {}, "Stats": {}, "SAs": {},},
             "Buildings": {},
             "IO_mat": {},
             "daily_infection": {},
@@ -55,13 +52,11 @@ class DySTUrbD_Epi(object):
         print("Current Device:", self.device)
 
         # self.cpu = len(psutil.Process().cpu_affinity())
+        self.cpu = psutil.cpu_count(logical=False)
         t1 = time()
         # print("Number of CPU:", self.cpu)
 
-        self.buildings = buildings.Buildings(
-            args,
-            self.device,
-        )
+        self.buildings = buildings.Buildings(args, self.device,)
         t2 = time()
         self._log_time("Buildings", t2 - t1)
 
@@ -86,6 +81,10 @@ class DySTUrbD_Epi(object):
         self.agents.set_routine(routine)
         t7 = time()
         self._log_time("Routine", t7 - t6)
+        print(routine.to_dense().sum(1).mean())
+        print(routine.to_dense().sum(1).unique(return_counts=True))
+        print(routine.to_dense().sum(1).bool().count_nonzero())
+        exit()
 
         self.gamma = self._get_gamma()
         t8 = time()
@@ -148,45 +147,57 @@ class DySTUrbD_Epi(object):
 
         Return
         -------
-        res : torch.Tensor (A+B, A+B)
+        res : torch.sparse_coo_tensor (A+B, A+B)
         """
         AA = self.network.AA.detach().clone()
         BB = self.network.BB.detach().clone()
         AB = self.network.AB["total"].detach().clone()
-        BA = torch.zeros_like(AB.T, device=self.device)
+        BA = torch.sparse_coo_tensor(size=AB.transpose(1, 0).shape, device=self.device)
 
         AAAB = torch.cat((AA, AB), 1)
         BABB = torch.cat((BA, BB), 1)
-        res = torch.cat((AAAB, BABB), 0)
+        res = torch.cat((AAAB, BABB), 0).coalesce()
 
         # Construct csr matrix version
-        dim = res.shape[0]
-        res = res.fill_diagonal_(0)
-        res = res.to_sparse()
         row_idx = res.indices()[0].detach().cpu().numpy()
         col_idx = res.indices()[1].detach().cpu().numpy()
         val = -torch.log(res.values()).detach().cpu().numpy()
-        csr = csr_matrix((val, (row_idx, col_idx)), shape=(dim, dim))
+        csr = csr_matrix((val, (row_idx, col_idx)), shape=res.shape)
 
-        res = dijkstra_mp64.multiSearch(csr, self.cpu)[0]
-        res = torch.from_numpy(res).to(self.device)
-        res = res.fill_diagonal_(float("inf"))
-        # TODO got reasonable outcome but different result
+        sparse = sparse_dijkstra_mp64.multiSearch_sparse(csr, self.cpu)
+        row_idx = torch.from_numpy(sparse.row).long()
+        col_idx = torch.from_numpy(sparse.col).long()
+        val = torch.from_numpy(sparse.data)
+        res = torch.sparse_coo_tensor(
+            torch.stack((row_idx, col_idx)), val, sparse.shape
+        ).coalesce()
 
+        del AAAB, BABB, row_idx, col_idx, val, csr, sparse
         return res
 
     def _prob_AA(self, dist):
         """
         Return agents-interaction matrix
+        Inverse of distance, that is, 
+        the closer the distance, the larger the interaction probability
 
         Return
         ------
-        res : torch.Tensor
+        res : torch.sparse_coo_tensor
         """
         num_a = self.network.AA.shape[0]
-        res = dist[:num_a, :num_a]
-        res = torch.exp(-res)
+        sparse_idx = dist.indices()
+        val = dist.values()
+        idx_aa = (sparse_idx[0] < num_a) & (sparse_idx[1] < num_a)
+        new_val = torch.exp(-val[idx_aa])
 
+        res = torch.sparse_coo_tensor(
+            torch.stack((sparse_idx[0][idx_aa], sparse_idx[1][idx_aa])),
+            new_val,
+            self.network.AA.shape,
+        ).coalesce()
+
+        del num_a, sparse_idx, val, idx_aa, new_val
         return res
 
     def _get_routine(self, args, dist):
@@ -195,59 +206,244 @@ class DySTUrbD_Epi(object):
 
         Return
         -------
-        res : torch.Tensor (A, B)
+        res : torch.sparse_coo_tensor (A, B)
         """
-        num_aa = self.network.AA.shape[0]  # total number of agents
+
+        batch = args["AA"]["batch"]
+        num_aa = self.network.AA.shape[0]  # total number of agent
         num_bb = self.network.BB.shape[0]  # total number of buildings
-        idx_0 = torch.arange(num_aa)
         dist_ab = args["distance"]["dist_ab"]  # Given distance threshold for AB network
         dist_bb = args["distance"]["dist_bb"]  # Given distance threshold for BB network
 
-        nodes_ab = dist[:num_aa, -num_bb:] < dist_ab  # a_nodes (A,B)
-        nodes_bb = dist[-num_bb:, -num_bb:] < dist_bb  # all buildings (A,B,B)
-        dummy_bb = torch.zeros((1, num_bb), device=self.device)  # empty row
-        nodes_bb = torch.cat((nodes_bb, dummy_bb), 0)
+        sparse_idx = dist.indices()
+        row = sparse_idx[0]
+        col = sparse_idx[1]
+
+        # Get all ab and bb pairs
+        mask_ab = (row < num_aa) & (col >= num_aa)
+        mask_bb = (row >= num_aa) & (col >= num_aa)
+
+        # Filter the index pairs
+        mask_ab &= dist.values() < dist_ab
+        mask_bb &= dist.values() < dist_bb
+
+        # get nodes_ab and nodes_bb in sparse
+        nodes_ab = (
+            torch.sparse_coo_tensor(
+                torch.stack((row[mask_ab], col[mask_ab] - num_aa)),
+                torch.ones(mask_ab.count_nonzero()).long(),
+                self.network.AB["total"].shape,
+            ).coalesce()
+            # .sub(self.network.AB["total"])
+            # .coalesce()
+        )
+        nodes_bb = torch.sparse_coo_tensor(
+            torch.stack((row[mask_bb] - num_aa, col[mask_bb] - num_aa)),
+            torch.ones(mask_bb.count_nonzero()).long(),
+            self.network.BB.shape,
+        ).coalesce()
 
         res = self.network.AB["total"].detach().clone()
         start = ["house", "anchor", "trivial"]
         end = ["anchor", "trivial", "house"]
 
         for s, e in zip(start, end):
-            nodes_end = self.network.AB[e].detach().clone()
-            dummy_end = ~(nodes_end.sum(1).bool())  # point to empty row
-            nodes_end = torch.cat((nodes_end, dummy_end.view(-1, 1)), 1)
-            idx_end = nodes_end.long().argmax(
-                dim=1
-            )  # get the end building index for each agent
-            near_end = nodes_bb.index_select(0, idx_end).bool()
+            # initialize end node and add dummy row
+            nodes_end = self.network.AB[e]
+
+            # get the end building index for each agent
+            idx_end = nodes_end.indices()[1]
+
+            # get candidate buildings near end node
+            near_end = nodes_bb.index_select(0, idx_end).coalesce()
+            near_end_candidates = near_end.indices()[1]
+
+            # broadcast agents indices to match the size of candidates
+            agents_end = nodes_end.indices()[0][near_end.indices()[0]]
+            sparse_end = torch.sparse_coo_tensor(
+                torch.stack((agents_end, near_end_candidates)),
+                near_end.values(),
+                nodes_end.shape,
+            ).coalesce()
+
             for cnt in range(2):
-                template = torch.zeros_like(self.network.AB["total"])
+                print(s, cnt)
+                # print(res)
+                print(res.values().unique(return_counts=True))
 
-                nodes_start = self.network.AB[s].detach().clone() if cnt < 1 else choice
-                dummy_start = ~(nodes_start.sum(1).bool())  # point to empty row
-                nodes_start = torch.cat((nodes_start, dummy_start.view(-1, 1)), 1)
-                idx_start = nodes_start.long().argmax(
-                    dim=1
-                )  # get the start building index for each agent
-                near_start = nodes_bb.index_select(0, idx_start).bool()
+                # prepare start node
+                nodes_start = (
+                    self.network.AB[s].detach().clone() if cnt < 1 else curr_start
+                )
 
-                candidates = near_start & near_end  # overlap between two buildings
-                candidates = (candidates | nodes_ab) & ~(self.network.AB["total"])
+                # get the start building index for each agent
+                idx_start = nodes_start.indices()[1]
 
-                idx_weight = candidates == True
-                weight = candidates.detach().clone().double()
-                if args["multinomial"]["symmetry"] is True:
-                    weight[:] = 1.0
-                else:
-                    weight[idx_weight] = args["multinomial"]["asymmetry"]["possible"]
-                    weight[~idx_weight] = args["multinomial"]["asymmetry"]["impossible"]
-                idx_1 = weight.multinomial(1)  # randomly pick one from each row
-                template[idx_0, idx_1.view(-1)] = 1
-                choice = template & candidates
+                # get candidate buildings near start node
+                near_start = nodes_bb.index_select(0, idx_start).coalesce()
+                near_start_candidates = near_start.indices()[1]
 
-                res |= choice  # add new building to routine (some are zeros)
+                # broadcast agents indices to match the size of candidates
+                agents_start = nodes_start.indices()[0][near_start.indices()[0]]
+                sparse_start = torch.sparse_coo_tensor(
+                    torch.stack((agents_start, near_start_candidates)),
+                    near_start.values(),
+                    nodes_ab.shape,
+                ).coalesce()
 
-        del (idx_0, nodes_ab, nodes_bb, dummy_bb)
+                # intersect between candidate buildings of start node and end node.
+                union = sparse_end.add(sparse_start).coalesce()
+                mask_intersect = union.values() == 2
+                candidates = torch.sparse_coo_tensor(
+                    torch.stack(
+                        (
+                            union.indices()[0][mask_intersect],
+                            union.indices()[1][mask_intersect],
+                        )
+                    ),
+                    torch.ones(union.indices()[0][mask_intersect].shape[0]).long(),
+                    nodes_ab.shape,
+                ).coalesce()
+
+                # Add nodes_ab to replicate  (candidates OR nodes_ab)
+                # Sub ab total to replicate & (~ab total)
+                # choose values > 0
+
+                print(nodes_ab.indices().shape)
+                idx_involved = candidates.indices()[0].unique_consecutive().long()
+                print(idx_involved)
+                nodes_ab_involved = torch.sparse_coo_tensor(
+                    torch.stack(
+                        (
+                            nodes_ab.indices()[0][idx_involved],
+                            nodes_ab.indices()[1][idx_involved],
+                        )
+                    ),
+                    nodes_ab.values()[idx_involved],
+                    nodes_ab.shape,
+                )
+                candidates = (
+                    candidates.add(nodes_ab_involved)
+                    .sub(self.network.AB["total"])
+                    .coalesce()
+                )
+                mask_cand = candidates.values() > 0
+                row_cand = candidates.indices()[0][mask_cand]
+                col_cand = candidates.indices()[1][mask_cand]
+
+                # TODO standardize the values to 1, or
+                # allow weight of 2 to emphasize socially + physically near buildings?
+                candidates = torch.sparse_coo_tensor(
+                    torch.stack((row_cand, col_cand)),
+                    torch.ones(row_cand.shape[0]),
+                    nodes_ab.shape,
+                ).coalesce()
+                # print(candidates.values().unique(return_counts=True))
+
+                # ===========================================================================
+                # The candidates should now include:
+                # - buildings that are near to both start and end nodes
+                # - buildings that are close to someone who are socially close with the agent
+                # ===========================================================================
+
+                # Batch building selection (assume that memory can hold multiples of building size)
+                # batch according to AA batch
+                # convert the selected rows to dense and use multinomial to pick a building
+                curr = 0
+                cnt_res = torch.sparse_coo_tensor(size=nodes_ab.shape)
+                while (num_aa - curr) > batch:
+                    batch_mask = (row_cand < (batch + curr)) & (row_cand >= curr)
+                    batch_row = row_cand[batch_mask]
+                    batch_row_unique = batch_row.unique_consecutive()
+                    batch_col = col_cand[batch_mask]
+                    batch_val = candidates.values()[batch_mask]
+                    batch_idx = torch.zeros_like(batch_row)
+                    batch_cnt = 0
+                    for idx in batch_row_unique:
+                        mask = batch_row == idx
+                        batch_idx[mask] = batch_cnt
+                        batch_cnt += 1
+                    batch_dense = (
+                        torch.sparse_coo_tensor(
+                            torch.stack((batch_idx, batch_col)),
+                            batch_val.float(),
+                            (batch_row_unique.shape[0], num_bb),
+                        )
+                        .coalesce()
+                        .to_dense()
+                    )
+                    # we know one agent will only match to one building
+                    # and the agent ids are sorted
+
+                    chosen_b = batch_dense.multinomial(1).view(-1)
+                    batch_sparse = torch.sparse_coo_tensor(
+                        torch.stack((batch_row_unique, chosen_b)),
+                        torch.ones(batch_row_unique.shape[0]),
+                        nodes_ab.shape,
+                    ).coalesce()
+                    cnt_res = cnt_res.add(batch_sparse).coalesce()
+                    curr += batch
+
+                # Process the remaining
+                batch_mask = row_cand >= curr
+                batch_row = row_cand[batch_mask]
+                batch_row_unique = batch_row.unique_consecutive()
+                batch_col = col_cand[batch_mask]
+                batch_val = candidates.values()[batch_mask]
+                batch_cnt = 0
+                batch_idx = torch.zeros_like(batch_row)
+                for idx in batch_row_unique:
+                    mask = batch_row == idx
+                    batch_idx[mask] = batch_cnt
+                    batch_cnt += 1
+                batch_dense = (
+                    torch.sparse_coo_tensor(
+                        torch.stack((batch_idx, batch_col)),
+                        batch_val.float(),
+                        (batch_row_unique.shape[0], num_bb),
+                    )
+                    .coalesce()
+                    .to_dense()
+                )
+                chosen_b = batch_dense.multinomial(1).view(-1)
+                batch_sparse = torch.sparse_coo_tensor(
+                    torch.stack((batch_row_unique, chosen_b)),
+                    torch.ones(batch_row_unique.shape[0]),
+                    nodes_ab.shape,
+                ).coalesce()
+                cnt_res = cnt_res.add(batch_sparse).coalesce()
+                mask_cnt = torch.randint(0, 2, cnt_res.values().shape).bool()
+                not_chosen_idx = cnt_res.indices()[0][~mask_cnt]
+                cnt_res = torch.sparse_coo_tensor(
+                    torch.stack(
+                        (
+                            cnt_res.indices()[0][mask_cnt],
+                            cnt_res.indices()[1][mask_cnt],
+                        )
+                    ),
+                    cnt_res.values()[mask_cnt],
+                    cnt_res.shape,
+                ).coalesce()
+                res = res.add(cnt_res).coalesce()
+                not_chosen_curr_building = self.agents.building[s][not_chosen_idx]
+                not_chosen_mask = not_chosen_curr_building != -1
+                not_chosen = torch.sparse_coo_tensor(
+                    torch.stack(
+                        (
+                            not_chosen_idx[not_chosen_mask],
+                            not_chosen_curr_building[not_chosen_mask].long(),
+                        )
+                    ),
+                    torch.ones(not_chosen_idx[not_chosen_mask].shape[0]),
+                    nodes_ab.shape,
+                )
+
+                curr_start = cnt_res.add(not_chosen).coalesce()
+
+        res = torch.sparse_coo_tensor(
+            res.indices(), torch.ones(res.indices()[0].shape), res.shape
+        )
+        del nodes_ab, nodes_bb
 
         return res
 
@@ -599,31 +795,19 @@ class DySTUrbD_Epi(object):
             + datetime.now().strftime("%M")
         )
         os.mkdir(path)
-        with open(
-            path + "/" + "results" + ".json",
-            "w",
-        ) as outfile:
+        with open(path + "/" + "results" + ".json", "w",) as outfile:
             json.dump(self.res["Results"], outfile)
         print("results.json")
 
-        with open(
-            path + "/" + "buildings" + ".json",
-            "w",
-        ) as outfile:
+        with open(path + "/" + "buildings" + ".json", "w",) as outfile:
             json.dump(self.res["Buildings"], outfile)
         print("buildings.json")
 
-        with open(
-            path + "/" + "io_mat" + ".json",
-            "w",
-        ) as outfile:
+        with open(path + "/" + "io_mat" + ".json", "w",) as outfile:
             json.dump(self.res["IO_mat"], outfile)
         print("io_mat.json")
 
-        with open(
-            path + "/" + "daily_infection" + ".json",
-            "w",
-        ) as outfile:
+        with open(path + "/" + "daily_infection" + ".json", "w",) as outfile:
             json.dump(self.res["daily_infection"], outfile)
         print("daily_infection.json")
 

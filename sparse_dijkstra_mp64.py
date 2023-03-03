@@ -1,24 +1,24 @@
 """
 Courtesy: https://github.com/cadop/dijkstra
+Sparse Version modified by: Lin, Zi Hen
+Idea: 
+Instead of using shared array for output, 
+use a shared dict to store sparse matrix from each process and concatenate.
+https://stackoverflow.com/questions/10415028/how-to-get-the-return-value-of-a-function-passed-to-multiprocessing-process
 
 Patches:
 1. Change dtype of indices and indptr from int to int32, to match the buffer size
 2. Change dtype of shared_prd from "i" to "d", to match the buffer size
 """
 import numpy as np
-import scipy
-import os
-import sys
-import time
 import multiprocessing
 from multiprocessing.sharedctypes import RawArray
-import math
-from scipy.sparse import csgraph, csr_matrix
-import ctypes
+from scipy.sparse import csgraph, csr_matrix, coo_matrix, vstack
+from collections import OrderedDict
 
 
 def sharedSearch_D(
-    indexList, dataset, shared_prd, shared_dist, idx, arrPos, sharedCSR, datashape
+    indexList, arrPos, sharedCSR, datashape, res_dict, idx
 ):
     """
     Calculates the shortest path using scipy Dijkstra.  Saves the results to a shared memory array.
@@ -27,10 +27,6 @@ def sharedSearch_D(
 
     indexList: used to create a range of indices to calculate shortest path on
         type: [int,int]
-
-    dataset: data used for shortest path.  in the multiprocessing setup this should be as lightweight as possible
-    as it is passed to each process.  Typically a scipy CSR matrix
-        type: scipy.csr
 
     shared_prd: A shared memory Raw array used to store the predecessors
         type: multiprocessing.sharedctypes.RawArray
@@ -50,15 +46,11 @@ def sharedSearch_D(
 
     Returns
 
-    Does not return anything.  Stores all results directly in shared memory array
+    Does not return anything.  Stores all results directly in shared memory dict
 
     """
     # create array of index list to be calculated
     indexList = range(indexList[0], indexList[1])
-
-    # load the shared array
-    X_np = np.frombuffer(shared_prd, dtype='int32')
-    Y_np = np.frombuffer(shared_dist, dtype=np.float64)
 
     # load the shared csr data and reconstruct it
     data = np.frombuffer(sharedCSR[0], dtype=np.float64)
@@ -67,18 +59,14 @@ def sharedSearch_D(
     reconCSR = csr_matrix((data, indices, indptr), shape=(datashape))
 
     # calculate the shortest path
-    distances, predecessors = csgraph.shortest_path(
-        reconCSR, method="D", indices=indexList, directed=True, return_predecessors=True
+    distances = csgraph.shortest_path(
+        reconCSR, method="D", indices=indexList, directed=True 
     )
+    distances[distances == np.inf] = 0
+    sparse = coo_matrix(distances)
+    res_dict[idx] = sparse 
 
-    pr_flat = predecessors.flatten()
-    dst_flat = distances.flatten()
-    # put results into shared array
-    X_np[arrPos[0] : arrPos[1]] = pr_flat
-    Y_np[arrPos[0] : arrPos[1]] = dst_flat
-
-
-def multiSearch(dataset, nprocs, returnShared=False):
+def multiSearch_sparse(dataset, nprocs):
     """
     Calculates the shortest path using scipy Dijkstra.
     Saves the results to a shared memory array.
@@ -104,14 +92,8 @@ def multiSearch(dataset, nprocs, returnShared=False):
         shape: same shape as the dense dataset
 
     """
-    singleArr = True
     # create an empty array
     datashape = np.shape(dataset)
-    X_size = datashape[0] * datashape[1]
-
-    # Create a shared array to store results
-    shared_prd = RawArray("i", X_size)
-    shared_dist = RawArray("d", X_size)
 
     # create shared arrays of the data making up the CSR matrix
     data_array = dataset.data
@@ -139,6 +121,11 @@ def multiSearch(dataset, nprocs, returnShared=False):
 
     # array to store processes
     procs = []
+    
+    # create a manager and its dict
+    manager = multiprocessing.Manager()
+    res_dict = manager.dict()
+
     for i in range(nprocs):
         # define the section to work on
         startIDX = i * chunk_calc
@@ -161,13 +148,11 @@ def multiSearch(dataset, nprocs, returnShared=False):
             target=sharedSearch_D,
             args=(
                 indexList,
-                None,
-                shared_prd,
-                shared_dist,
-                i,
                 arrPos,
                 shared_csr,
                 datashape,
+                res_dict,
+                i
             ),
         )
         ptemp.daemon = True
@@ -181,14 +166,10 @@ def multiSearch(dataset, nprocs, returnShared=False):
     for ptemp in procs:
         ptemp.join()
 
-    # if the flag is set to retured the shared memory
-    if returnShared == True:
-        return shared_dist, shared_prd
-
-    X_np = np.frombuffer(shared_prd, dtype='int32').reshape(datashape)
-    Y_np = np.frombuffer(shared_dist, dtype=np.float64).reshape(datashape)
-
-    return Y_np, X_np
+    # sort manager dict key and loop through dict to concat all the sparse matrix 
+    ordered_dict = OrderedDict(sorted(res_dict.items()))
+    res = vstack(ordered_dict.values())
+    return res
 
 
 if __name__ == "__main__":

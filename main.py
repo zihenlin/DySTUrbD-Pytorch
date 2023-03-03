@@ -20,7 +20,7 @@ def epi_run(args):
     for cnt in range(ticks):
         with torch.no_grad():
             model = DySTUrbD_Epi(args, cnt)
-            model()
+            # model()
 
 
 if __name__ == "__main__":
