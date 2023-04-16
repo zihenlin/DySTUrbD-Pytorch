@@ -205,11 +205,16 @@ class Agents(object):
             nrows=self.rows["employ"],
             # skiprows=1,
         )
-        keys = ["status", "local", "income"]
+        keys = ["status", "local"]
         mask = ~(self.identity["group"] == 1)
         res = dict()
         for idx in range(len(keys)):
             res[keys[idx]] = data[:, idx] * mask
+
+        # Fix loading res["income"] directly from data
+        household_income = data[:, 2]
+        res["income"] = torch.zeros_like(self.identity["group"])
+
 
         align = (res["status"] == 0) & (res["local"] == 1)
         res["status"][align] = 1
@@ -221,7 +226,7 @@ class Agents(object):
             mask = mask_h & mask_i
             num = mask.count_nonzero().item()
             if num > 0:
-                res["income"][mask] /= num
+                res["income"][mask] = household_income[mask] / num
             else:
                 res["income"][mask] = 0
 
@@ -299,7 +304,17 @@ class Agents(object):
             res["building"][cnt : cnt + num] = idx
             cnt += num
 
-        del (job_density, job_floor, land_use, job_num, total, cnt)
+        # Fix the bug that normal may produce negative income
+        invalid_income = res["income"] <= 0
+        invalid_cnt = invalid_income.count_nonzero()
+        while invalid_cnt  > 0:
+            res["income"][invalid_income] = torch.normal(
+                avg, std, size=(invalid_cnt,), device=self.device
+            )
+            invalid_income = res["income"] <= 0
+            invalid_cnt = invalid_income.count_nonzero()
+
+        del (job_density, job_floor, land_use, job_num, total, cnt, invalid_income, invalid_cnt)
         return res
 
     def _assign_job(self, jobs, j):
@@ -760,16 +775,21 @@ class Agents(object):
         a_inf = self.get_infected()
         a_recovered = self.get_recovered()
         b_inf = (
-            routine[a_inf].sum(0).bool()
+            routine[a_inf].sum(0).bool().float()
         )  # get a list of buildings visited by infected agents
+        # a_exposed = (
+        #     (routine.logical_and(b_inf)).sum(1) & ~a_inf & ~a_recovered
+        # )  # uninfected agents visited same buildings
+        
+        # new approach using @
         a_exposed = (
-            (routine.logical_and(b_inf)).sum(1) & ~a_inf & ~a_recovered
+            (routine.detach().float() @ b_inf).bool() & ~a_inf & ~a_recovered
         )  # uninfected agents visited same buildings
 
-        a_meet_a = (routine * a_exposed.view(-1, 1)).float() @ (
-            routine * a_inf.view(-1, 1)
+        a_meet_a = (routine.detach() * a_exposed.view(-1, 1)).float() @ (
+            routine.detach() * a_inf.view(-1, 1)
         ).T.float()
-        a_meet_a = a_meet_a.bool()
+        a_meet_a = a_meet_a.bool().float()
         a_meet_a.fill_diagonal_(0)
 
         contagious_strength = gamma.log_prob(self.period["sick"]).to(self.device).exp()

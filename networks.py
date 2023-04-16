@@ -86,14 +86,30 @@ class Networks(object):
         income = self.__income_sim(agents, device)
         age = self.__age_sim(agents)
         dist = self.__house_dist(agents, buildings)
-        w = args["AA"]["weights"]
-        res = income.mul(w["income"]).mul(age.mul(w["age"])).mul(dist.mul(w["dist"]))
 
+
+        age[age < threshold] = 0
+        print("age:", (age == 1).count_nonzero(), age.count_nonzero())
+        
+        income = income.mul(age)
+        income[income < threshold] = 0
+        print("income:", (income == 1).count_nonzero(), income.count_nonzero())
+
+        dist = dist.mul(income)
+        dist[dist < threshold] = 0
+        print("dist:", (dist == 1).count_nonzero(), dist.count_nonzero())
+
+        # w = args["AA"]["weights"]
+        # res = income.mul(w["income"]).mul(age.mul(w["age"])).mul(dist.mul(w["dist"]))
+
+        res = dist
         h = agents.identity["house"]
         res[h == h.view(-1, 1)] = 1  # same house gets max probability
         res[res < threshold] = 0
+        print("res:", (res == 1).count_nonzero(), res.count_nonzero())
+        # exit()
 
-        del threshold, income, age, dist, w, h
+        # del threshold, income, age, dist, w, h
         return res
 
     def __income_sim(self, agents, device):
