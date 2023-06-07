@@ -18,7 +18,7 @@ files:
   admission_dir: "./data/admission_prob.csv"
   mortality_dir: "./data/mortality_prob.csv"
 
-profile: False
+profile: True
 debug: False
 
 # Columns to read
@@ -40,7 +40,7 @@ rows:
   agent: 1000
   house: 1000
   employ: 1000
-  building: 1200
+  building: null
 
 # USG for Jerusalem
 usg:
@@ -93,9 +93,11 @@ multinomial:
 BB:
   threshold: 0.00161
   beta: 2
+  batch: 1000
 
 AA:
   threshold: 0.95
+  batch: 1000
   # weights for agent-agent network components (income, age, buildings)
   weights:
     income: 1
