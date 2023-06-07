@@ -54,9 +54,9 @@ class DySTUrbD_Epi(object):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print("Current Device:", self.device)
 
-        # self.cpu = len(psutil.Process().cpu_affinity())
+        self.cpu = len(psutil.Process().cpu_affinity())
         t1 = time()
-        # print("Number of CPU:", self.cpu)
+        print("Number of CPU:", self.cpu)
 
         self.buildings = buildings.Buildings(
             args,
@@ -113,7 +113,7 @@ class DySTUrbD_Epi(object):
         Save and print the essential data generated from simulation.
         """
         self.res["Results"]["Stats"][day][key] = data
-        print(f"{key}: {data}")
+        print(f"{key:-<20}{data:->20}")
 
     def _get_gamma(self):
         """
@@ -541,7 +541,7 @@ class DySTUrbD_Epi(object):
                 print("Dead", (self.agents.status == 8).count_nonzero())
                 print()
 
-            if day == 50:
+            if day == 20:
                 exit()
                 break
             day += 1
