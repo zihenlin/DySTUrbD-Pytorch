@@ -73,7 +73,8 @@ class DySTUrbD_Epi(object):
         t4 = time()
         self._log_time("Networks", t4 - t3)
 
-        dist = self._get_dist()
+        self.dist = self._get_dist()
+        dist = self.dist
         t5 = time()
         self._log_time("ShortestPath", t5 - t4)
 
@@ -83,6 +84,10 @@ class DySTUrbD_Epi(object):
         self._log_time("Interaction", t6 - t5)
 
         routine = self._get_routine(args, dist)
+        print("routine mean:", routine.float().sum(1).mean())
+        # print("routine hist:", routine.float().sum(1).detach().cpu().histogram(bins=8,range=(2,9)))
+        # exit()
+        # return None
         self.agents.set_routine(routine)
         t7 = time()
         self._log_time("Routine", t7 - t6)
@@ -211,43 +216,77 @@ class DySTUrbD_Epi(object):
         res = self.network.AB["total"].detach().clone()
         start = ["house", "anchor", "trivial"]
         end = ["anchor", "trivial", "house"]
+        curr_pos = self.network.AB["house"].detach().clone()
+        curr_pos = curr_pos.long().argmax(dim=1)
 
         for s, e in zip(start, end):
             nodes_end = self.network.AB[e].detach().clone()
-            dummy_end = ~(nodes_end.sum(1).bool())  # point to empty row
+            dummy_end = ~(nodes_end.sum(1).bool())  # point to empty col
             nodes_end = torch.cat((nodes_end, dummy_end.view(-1, 1)), 1)
             idx_end = nodes_end.long().argmax(
                 dim=1
             )  # get the end building index for each agent
+
+            # get the reachable buildings from end for each agent
             near_end = nodes_bb.index_select(0, idx_end).bool()
+            # print("near_end always have candidates:", near_end.sum(1).bool().all())
             for cnt in range(2):
                 template = torch.zeros_like(self.network.AB["total"])
 
-                nodes_start = self.network.AB[s].detach().clone() if cnt < 1 else choice
-                dummy_start = ~(nodes_start.sum(1).bool())  # point to empty row
-                nodes_start = torch.cat((nodes_start, dummy_start.view(-1, 1)), 1)
-                idx_start = nodes_start.long().argmax(
-                    dim=1
-                )  # get the start building index for each agent
-                near_start = nodes_bb.index_select(0, idx_start).bool()
+                # nodes_start = self.network.AB[s].detach().clone() if cnt < 1 else choice
+                # dummy_start = ~(nodes_start.sum(1).bool())  # point to empty col
+                # nodes_start = torch.cat((nodes_start, dummy_start.view(-1, 1)), 1)
+                # idx_start = nodes_start.long().argmax(
+                #     dim=1
+                # )  # get the start building index for each agent
+
+                # get the reachable buildings from start for each agent
+                # near_start = nodes_bb.index_select(0, idx_start).bool()
+
+                # get the reachable buildings from current position for each agent
+                near_start = nodes_bb.index_select(0, curr_pos).bool()
 
                 candidates = near_start & near_end  # overlap between two buildings
+                # print("Agents with candidates:", candidates.sum(1).bool().count_nonzero())
                 candidates = (candidates | nodes_ab) & ~(self.network.AB["total"])
+                candidates &= ~dummy_end.view(-1,1)
+                # print("Agents with candidates with nodes ab:", candidates.sum(1).bool().count_nonzero())
 
                 idx_weight = candidates == True
                 weight = candidates.detach().clone().double()
-                if args["multinomial"]["symmetry"] is True:
-                    weight[:] = 1.0
-                else:
-                    weight[idx_weight] = args["multinomial"]["asymmetry"]["possible"]
-                    weight[~idx_weight] = args["multinomial"]["asymmetry"]["impossible"]
+                no_candidates = ~(candidates.sum(1).bool())
+                weight[no_candidates] = 1.0
+                # if args["multinomial"]["symmetry"] is True:
+                #     weight[:] = 1.0
+                # else:
+                #     weight[idx_weight] = args["multinomial"]["asymmetry"]["possible"]
+                #     weight[~idx_weight] = args["multinomial"]["asymmetry"]["impossible"]
                 idx_1 = weight.multinomial(1)  # randomly pick one from each row
                 template[idx_0, idx_1.view(-1)] = 1
-                choice = template & candidates
 
+                
+
+                random_mask = torch.zeros(((~dummy_end).count_nonzero(),), device=self.device).uniform_() < 0.5
+                # print("random_mask nonzero:", random_mask.count_nonzero(), random_mask.shape)
+                # print("non dummy end",(~dummy_end).count_nonzero())
+                # update current position
+                # print("")
+                choice = template & candidates 
+                # print("choice nonzero", choice.sum(1).count_nonzero())
+                choice[~dummy_end] &= random_mask.view(-1,1)
+                # print("choice nonzero", choice.sum(1).count_nonzero())
                 res |= choice  # add new building to routine (some are zeros)
 
+                # update curr_pos
+                dummy_choice = ~(choice.sum(1).bool())  # point to empty col
+                choice = torch.cat((choice, dummy_choice.view(-1, 1)), 1)
+                idx_choice = choice.long().argmax(dim=1)  # get updated buildings + dummy  
+                agent_with_update = idx_choice != num_bb
+                # print("agent with update:", agent_with_update.sum())
+                curr_pos[agent_with_update] = idx_choice[agent_with_update] 
+
         del (idx_0, nodes_ab, nodes_bb, dummy_bb)
+        # exit()
 
         return res
 
@@ -541,9 +580,9 @@ class DySTUrbD_Epi(object):
                 print("Dead", (self.agents.status == 8).count_nonzero())
                 print()
 
-            if day == 20:
-                exit()
-                break
+            # if day == 20:
+                # exit()
+            #    break
             day += 1
             del (
                 num_admission,
@@ -568,7 +607,7 @@ class DySTUrbD_Epi(object):
             gc.collect()
             torch.cuda.empty_cache()
 
-        self.output()
+        # self.output()
 
         print()
         print("SIMULATION tick", self.count, "COMPLETE!")
